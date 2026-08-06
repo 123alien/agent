@@ -1,0 +1,53 @@
+from pathlib import Path
+import sys
+
+from fastapi.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.main import app
+
+
+def main() -> None:
+    client = TestClient(app)
+    sample_path = Path("samples/demo_tender.txt")
+    response = client.post(
+        "/api/agent/tasks",
+        data={
+            "project_id": "P-DEMO-001",
+            "project_name": "某学校智慧教室设备采购项目",
+            "check_type": "full",
+        },
+        files=[
+            (
+                "files",
+                (
+                    sample_path.name,
+                    sample_path.read_bytes(),
+                    "text/plain",
+                ),
+            )
+        ],
+    )
+    response.raise_for_status()
+    task_id = response.json()["task_id"]
+
+    task_response = client.get(f"/api/agent/tasks/{task_id}")
+    task_response.raise_for_status()
+    task = task_response.json()
+
+    print("task_id:", task_id)
+    print("status:", task["status"])
+    print("summary:", task["result"]["summary"])
+    print("issues:", len(task["result"]["issues"]))
+    for issue in task["result"]["issues"]:
+        print("-", issue["agent"], issue["risk_level"], issue["issue_type"])
+
+    report_response = client.get(f"/api/agent/tasks/{task_id}/report")
+    report_response.raise_for_status()
+    print("report:", f"data/reports/{task_id}.md")
+
+
+if __name__ == "__main__":
+    main()
