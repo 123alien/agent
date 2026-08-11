@@ -288,6 +288,18 @@ class AnomalyAnalyzerAgent:
             if not evidence or any(value not in source_bundle for value in evidence):
                 continue
             anomaly_type = str(item.get("anomaly_type", "其他待调查异常"))
+            semantic_text = " ".join(
+                str(item.get(name, ""))
+                for name in ("description", "basis", "suggestion")
+            )
+            # A bid being below the control price while its itemized sum is
+            # internally consistent is not, by itself, an anomaly.
+            if (
+                "报价合理性" in semantic_text
+                and "低于" in semantic_text
+                and ("合计" in semantic_text or "总价一致" in semantic_text)
+            ):
+                continue
             fingerprint = (anomaly_type, tuple(sorted(entities)), tuple(sorted(evidence)))
             if fingerprint in seen:
                 continue
@@ -344,6 +356,7 @@ class AnomalyAnalyzerAgent:
         issues.extend(self._cross_lot_score_differences(parsed_docs))
         issues.extend(self._price_pattern_anomalies(parsed_docs))
         issues.extend(self._shared_identity_anomalies(parsed_docs, raw_texts, contexts))
+        issues.extend(self._metadata_overlap_anomalies(parsed_docs, raw_texts))
         issues.extend(self._document_similarity_anomalies(parsed_docs, raw_texts))
 
         summary = f"异常分析完成，发现 {len(issues)} 项异常或风险线索。"
@@ -455,24 +468,144 @@ class AnomalyAnalyzerAgent:
             unique = sorted({round(item.bid_price, 2) for _, item in rows})
             if len(unique) < 3:
                 continue
-            gaps = [round(unique[i + 1] - unique[i], 2) for i in range(len(unique) - 1)]
-            tolerance = max(0.01, abs(gaps[0]) * 0.001)
-            if gaps[0] == 0 or not all(abs(gap - gaps[0]) <= tolerance for gap in gaps[1:]):
+            sequences: list[list[float]] = []
+            for left in range(len(unique) - 2):
+                for middle in range(left + 1, len(unique) - 1):
+                    gap = round(unique[middle] - unique[left], 2)
+                    if gap <= 0:
+                        continue
+                    target = round(unique[middle] + gap, 2)
+                    if target in unique[middle + 1:]:
+                        sequences.append([unique[left], unique[middle], target])
+            if not sequences:
                 continue
-            evidence = [self._score_evidence(doc, item, item.bid_price) for doc, item in rows]
+            sequence = max(sequences, key=lambda values: values[0])
+            gap = round(sequence[1] - sequence[0], 2)
+            matched_rows = [
+                (doc, item) for doc, item in rows
+                if round(item.bid_price, 2) in sequence
+            ]
+            evidence = [self._score_evidence(doc, item, item.bid_price) for doc, item in matched_rows]
             issues.append(Issue(
                 agent=self.name,
                 risk_level="中",
                 issue_type="报价等差规律异常",
-                source_file="、".join(dict.fromkeys(doc.filename for doc, _ in rows)),
+                source_file="、".join(dict.fromkeys(doc.filename for doc, _ in matched_rows)),
                 source_location=lot or "未分标段",
-                description=f"{len(unique)}个报价呈等差排列，相邻差额均约为{gaps[0]:.2f}元。",
-                basis="报价规律属于统计异常线索，不能单独作为串通投标结论。",
+                description=f"检测到3个报价呈等差排列，相邻差额均约为{gap:.2f}元。",
+                basis="报价规律属于统计异常线索，不能单独作为串通投标或其他违法行为的结论。",
                 suggestion="结合成本构成、文件相似度、主体关系和提交环境进一步人工核查。",
                 evidence=evidence,
                 requires_human_review=True,
                 assessment="待人工判断",
                 confidence=0.65,
+            ))
+        return issues
+
+    def _metadata_overlap_anomalies(
+        self, docs: list[ParsedDocument], raw_texts: dict[str, str]
+    ) -> list[Issue]:
+        """Extract shared submission metadata from uploaded business tables."""
+        rows: list[dict[str, str]] = []
+        bid_rows: list[dict[str, object]] = []
+        source_files: list[str] = []
+        for doc in docs:
+            text = raw_texts.get(doc.file_id, "")
+            if "supplier_code" not in text or "machine_code" not in text:
+                continue
+            source_files.append(doc.filename)
+            in_metadata = False
+            in_bids = False
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if line.startswith("【工作表：投标记录】"):
+                    in_bids = True
+                    in_metadata = False
+                    continue
+                if line.startswith("【工作表：文件与网络元数据】"):
+                    in_metadata = True
+                    in_bids = False
+                    continue
+                if (in_metadata or in_bids) and line.startswith("【工作表："):
+                    in_metadata = False
+                    in_bids = False
+                    continue
+                if in_bids and "|" in line and not line.startswith("supplier_code"):
+                    cells = [cell.strip() for cell in line.split("|")]
+                    if len(cells) >= 3:
+                        try:
+                            bid_rows.append({"supplier_name": cells[1], "price": float(cells[2]), "raw_line": line})
+                        except ValueError:
+                            pass
+                    continue
+                if not in_metadata or "|" not in line or line.startswith("supplier_code"):
+                    continue
+                cells = [cell.strip() for cell in line.split("|")]
+                if len(cells) < 9:
+                    continue
+                row = dict(zip(
+                    ("supplier_code", "supplier_name", "file_author", "created_time", "creation_tool", "upload_ip", "mac_address", "machine_code", "cost_software_lock_id"),
+                    cells[:9],
+                ))
+                row["raw_line"] = line
+                rows.append(row)
+
+        by_pair: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+        strong_fields = (
+            ("upload_ip", "上传IP"),
+            ("mac_address", "MAC地址"),
+            ("machine_code", "机器码"),
+            ("cost_software_lock_id", "造价软件加密锁号"),
+            ("file_author", "文件作者"),
+            ("creation_tool", "创建工具"),
+        )
+        for index, left in enumerate(rows):
+            for right in rows[index + 1:]:
+                pair = tuple(sorted((left["supplier_name"], right["supplier_name"])))
+                for field, label in strong_fields:
+                    value = left.get(field, "")
+                    if value and value == right.get(field, ""):
+                        by_pair[pair].append((label, value))
+
+        issues: list[Issue] = []
+        price_sequences: list[list[dict[str, object]]] = []
+        ordered_bids = sorted(bid_rows, key=lambda row: float(row["price"]))
+        for left in range(len(ordered_bids) - 2):
+            for middle in range(left + 1, len(ordered_bids) - 1):
+                gap = float(ordered_bids[middle]["price"]) - float(ordered_bids[left]["price"])
+                if gap <= 0:
+                    continue
+                for right in ordered_bids[middle + 1:]:
+                    if abs(float(right["price"]) - float(ordered_bids[middle]["price"]) - gap) <= max(0.01, gap * 0.001):
+                        price_sequences.append([ordered_bids[left], ordered_bids[middle], right])
+        for pair, overlaps in by_pair.items():
+            labels = {label for label, _ in overlaps}
+            if len(labels) < 3:
+                continue
+            related_rows = [row["raw_line"] for row in rows if row["supplier_name"] in pair]
+            related_sequence = next(
+                (
+                    sequence for sequence in price_sequences
+                    if set(pair).issubset({str(row["supplier_name"]) for row in sequence})
+                ),
+                None,
+            )
+            price_evidence = [str(row["raw_line"]) for row in related_sequence] if related_sequence else []
+            evidence = [*related_rows[:2], *price_evidence]
+            price_note = " 同时检测到包含相关主体的3个报价呈等差排列，该报价规律仅作为统计异常线索。" if price_evidence else ""
+            issues.append(Issue(
+                agent=self.name,
+                risk_level="高",
+                issue_type="设备网络与文件元数据组合异常",
+                source_file="、".join(source_files),
+                source_location="、".join(pair),
+                description=f"{pair[0]}与{pair[1]}存在{len(labels)}项提交环境或文件制作元数据重合。{price_note}",
+                basis="多个相互独立的设备、网络和文件制作信号同时重合，构成高风险关联线索；报价规律不能单独定性，所有线索均不能直接认定串通投标。",
+                suggestion="核查文件编制主体、上传环境、设备使用关系及相关情况说明，形成完整证据链后由人工判断。",
+                evidence=evidence,
+                requires_human_review=True,
+                assessment="待人工判断",
+                confidence=0.85,
             ))
         return issues
 
@@ -484,13 +617,17 @@ class AnomalyAnalyzerAgent:
     ) -> list[Issue]:
         issues: list[Issue] = []
         values: dict[tuple[str, str], set[str]] = defaultdict(set)
-        for doc in docs:
+        response_docs = [
+            doc for doc in docs
+            if doc.document_subtype == "响应文件" or doc.file_type == "投标文件"
+        ]
+        for doc in response_docs:
             text = raw_texts.get(doc.file_id, "")
             for phone in set(re.findall(r"(?<!\d)1[3-9]\d{9}(?!\d)", text)):
                 values[("联系电话", phone)].add(doc.file_id)
             for email in set(re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)):
                 values[("电子邮箱", email.lower())].add(doc.file_id)
-        names = {doc.file_id: doc.filename for doc in docs}
+        names = {doc.file_id: doc.filename for doc in response_docs}
         for (kind, value), document_ids in values.items():
             if len(document_ids) < 2:
                 continue
@@ -515,23 +652,50 @@ class AnomalyAnalyzerAgent:
         self, docs: list[ParsedDocument], raw_texts: dict[str, str]
     ) -> list[Issue]:
         issues: list[Issue] = []
-        candidates = [(doc, re.sub(r"\s+", "", raw_texts.get(doc.file_id, ""))) for doc in docs]
-        candidates = [(doc, text[:50000]) for doc, text in candidates if len(text) >= 300]
-        for index, (left, left_text) in enumerate(candidates[:30]):
-            for right, right_text in candidates[index + 1:30]:
-                ratio = SequenceMatcher(None, left_text, right_text).ratio()
-                if ratio < 0.92:
+        response_docs = [
+            doc for doc in docs
+            if doc.document_subtype == "响应文件" or doc.file_type == "投标文件"
+        ][:30]
+        line_sets: dict[str, set[str]] = {}
+        line_frequency: dict[str, int] = defaultdict(int)
+        for doc in response_docs:
+            lines = {
+                re.sub(r"\s+", "", line).strip()
+                for line in raw_texts.get(doc.file_id, "").splitlines()
+                if len(re.sub(r"\s+", "", line).strip()) >= 24
+            }
+            line_sets[doc.file_id] = lines
+            for line in lines:
+                line_frequency[line] += 1
+
+        distinctive = {
+            document_id: {line for line in lines if line_frequency[line] <= 2}
+            for document_id, lines in line_sets.items()
+        }
+        for index, left in enumerate(response_docs):
+            for right in response_docs[index + 1:]:
+                shared = sorted(
+                    distinctive.get(left.file_id, set()) & distinctive.get(right.file_id, set()),
+                    key=lambda value: (-len(value), value),
+                )
+                # Two identical sentences are common in templated tender
+                # responses. Require three distinctive long lines before
+                # raising a cross-document similarity clue.
+                if len(shared) < 3 or sum(len(value) for value in shared) < 80:
                     continue
+                left_text = "\n".join(sorted(distinctive.get(left.file_id, set())))
+                right_text = "\n".join(sorted(distinctive.get(right.file_id, set())))
+                ratio = SequenceMatcher(None, left_text, right_text).ratio()
                 issues.append(Issue(
                     agent=self.name,
                     risk_level="中",
                     issue_type="跨文件内容高度相似",
                     source_file=f"{left.filename}、{right.filename}",
                     source_location=f"{left.filename}、{right.filename}",
-                    description=f"两份文件的规范化文本相似度为{ratio:.2%}。",
-                    basis="内容高度相似仅为异常线索，应排除统一模板、共同采购需求及法定格式造成的相似。",
+                    description=f"两份文件存在{len(shared)}处非通用长文本完全一致，去除多文件共有模板行后的相似度为{ratio:.2%}。",
+                    basis="已排除至少三份响应文件共同出现的模板行；剩余非通用长文本重合仅作为异常线索，不能直接认定串通投标。",
                     suggestion="对非模板章节、错别字、排版特征和文件元数据进行进一步比对。",
-                    evidence=[],
+                    evidence=shared[:5],
                     requires_human_review=True,
                     assessment="待人工判断",
                     confidence=0.6,

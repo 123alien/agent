@@ -115,11 +115,13 @@ def make_seal(name: str, output: Path) -> None:
     draw.ellipse((72, 72, 568, 568), outline=red, width=5)
     draw.polygon([(320, 205), (348, 288), (436, 288), (365, 339), (392, 425),
                   (320, 374), (248, 425), (275, 339), (204, 288), (292, 288)], fill=red)
-    title_font = ImageFont.truetype(_font_path(), 46)
+    # Keep the company name inside the inner ring. A larger font lets the
+    # circle cut through the edge characters and creates avoidable OCR noise.
+    title_font = ImageFont.truetype(_font_path(), 38)
     test_font = ImageFont.truetype(_font_path(), 40)
     label = name
     bbox = draw.textbbox((0, 0), label, font=title_font)
-    draw.text(((640 - (bbox[2] - bbox[0])) / 2, 90), label, fill=red, font=title_font)
+    draw.text(((640 - (bbox[2] - bbox[0])) / 2, 105), label, fill=red, font=title_font)
     test_label = "系统测试专用章"
     bbox = draw.textbbox((0, 0), test_label, font=test_font)
     draw.text(((640 - (bbox[2] - bbox[0])) / 2, 500), test_label, fill=red, font=test_font)

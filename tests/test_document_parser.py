@@ -185,7 +185,9 @@ class DocumentParserAgentTests(unittest.TestCase):
 
     def test_matches_recognized_seal_text_to_document_entity(self) -> None:
         self.assertTrue(_seal_matches_entity("甲科技有限公司", ["投标人：甲科技有限公司"]))
+        self.assertTrue(_seal_matches_entity("诚科技有限公司\n系统测试专用章", ["华诚科技有限公司"]))
         self.assertFalse(_seal_matches_entity("乙信息有限公司", ["投标人：甲科技有限公司"]))
+        self.assertFalse(_seal_matches_entity("成科技有限公司\n系统测试专用章", ["天远科技有限公司"]))
         self.assertIsNone(_seal_matches_entity("", ["投标人：甲科技有限公司"]))
 
     def test_extracts_rejection_opinion_and_candidate_ranking(self) -> None:

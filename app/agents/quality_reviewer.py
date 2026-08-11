@@ -46,7 +46,14 @@ class QualityReviewerAgent:
                 continue
             if not issue.issue_id:
                 identity = "|".join(
-                    [issue.agent, issue.source_file, issue.issue_type, *issue.evidence]
+                    [
+                        issue.agent,
+                        issue.source_file,
+                        issue.source_location,
+                        issue.issue_type,
+                        issue.description,
+                        *issue.evidence,
+                    ]
                 )
                 issue.issue_id = f"I{sha256(identity.encode('utf-8')).hexdigest()[:12]}"
             valid_issues.append(issue)

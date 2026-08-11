@@ -478,7 +478,7 @@ def _extract_tabular_records(content: ParsedFileContent) -> tuple[
         if len(table.rows) < 2:
             continue
         headers = table.rows[0]
-        bidder_i = _header_index(headers, "投标人", "供应商", "单位名称")
+        bidder_i = _header_index(headers, "投标人", "供应商", "单位名称", "supplier_name", "bidder")
         expert_i = _header_index(headers, "专家", "评委")
         factor_i = _header_index(headers, "评审因素", "评分项", "评分因素")
         max_i = _header_index(headers, "满分", "最高分")
@@ -487,7 +487,7 @@ def _extract_tabular_records(content: ParsedFileContent) -> tuple[
         weighted_i = _header_index(headers, "折算得分", "加权得分")
         total_i = _header_index(headers, "总得分", "总分", "合计得分")
         rank_i = _header_index(headers, "排名", "排序", "名次")
-        price_i = _header_index(headers, "投标报价", "报价金额", "投标总价")
+        price_i = _header_index(headers, "投标报价", "报价金额", "投标总价", "bid_price")
         lot_i = _header_index(headers, "标段", "包号", "采购包")
         if bidder_i is None:
             continue
@@ -583,11 +583,17 @@ def _expected_visual_marks(content: ParsedFileContent) -> list[tuple[str, int, s
 
 
 def _seal_matches_entity(recognized_text: str, entities: list[str]) -> bool | None:
-    recognized = re.sub(r"[^\w\u4e00-\u9fff]", "", recognized_text)
+    recognized = re.sub(r"系统测试专用章|测试专用章|合同专用章|财务专用章|公章", "", recognized_text)
+    recognized = re.sub(r"[^\w\u4e00-\u9fff]", "", recognized)
     candidates = [re.sub(r"[^\w\u4e00-\u9fff]", "", item) for item in entities if item]
     if not recognized or not candidates:
         return None
-    return any(recognized in candidate or candidate in recognized for candidate in candidates)
+    if any(recognized in candidate or candidate in recognized for candidate in candidates):
+        return True
+    # Only tolerate contiguous leading/trailing OCR omissions (handled by the
+    # substring check above). A single substituted character may represent a
+    # genuinely different legal entity, so edit-distance matching is unsafe.
+    return False
 
 
 class DocumentParserAgent:

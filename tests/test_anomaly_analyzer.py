@@ -132,6 +132,7 @@ class AnomalyAnalyzerTests(unittest.TestCase):
             ScoreSummary(bidder="甲公司", lot="包2", total_score=76),
         ]
         self.doc.opening_records = [
+            OpeningRecord(bidder="正常公司", lot="包1", bid_price=923000),
             OpeningRecord(bidder="甲公司", lot="包1", bid_price=980000),
             OpeningRecord(bidder="乙公司", lot="包1", bid_price=990000),
             OpeningRecord(bidder="丙公司", lot="包1", bid_price=1000000),
@@ -142,6 +143,71 @@ class AnomalyAnalyzerTests(unittest.TestCase):
         issue_types = {item.issue_type for item in result.issues}
         self.assertIn("同一供应商跨标段得分差异异常", issue_types)
         self.assertIn("报价等差规律异常", issue_types)
+
+    def test_business_table_metadata_overlap_is_detected_as_combined_clue(self) -> None:
+        metadata = ParsedDocument(
+            file_id="F-XLSX", filename="电子交易元数据.xlsx", file_type="业务文件",
+            document_subtype="其他资料", text_length=500,
+        )
+        text = """【工作表：文件与网络元数据】
+supplier_code | supplier_name | file_author | created_time | creation_tool | upload_ip | mac_address | machine_code | cost_software_lock_id
+S002 | 博远公司 | 制作中心 | 2026-08-08T10:15:00 | WPS | 117.20.33.15 | BC-22 | PC-X888 | LOCK-7788
+S003 | 新联公司 | 制作中心 | 2026-08-08T10:16:00 | WPS | 117.20.33.15 | BC-22 | PC-X888 | LOCK-7788
+【工作表：其他】"""
+        issues = self.agent._metadata_overlap_anomalies([metadata], {"F-XLSX": text})
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].issue_type, "设备网络与文件元数据组合异常")
+        self.assertIn("不能直接认定串通投标", issues[0].basis)
+
+    def test_business_metadata_does_not_duplicate_contact_identity(self) -> None:
+        response = ParsedDocument(
+            file_id="F-BID", filename="甲公司投标文件.pdf", file_type="投标文件",
+            document_subtype="响应文件", text_length=100,
+        )
+        metadata = ParsedDocument(
+            file_id="F-XLSX", filename="电子交易元数据.xlsx", file_type="业务文件",
+            document_subtype="其他资料", text_length=100,
+        )
+        issues = self.agent._shared_identity_anomalies(
+            [response, metadata],
+            {"F-BID": "联系人13800001111", "F-XLSX": "甲公司 13800001111"},
+            None,
+        )
+        self.assertEqual(issues, [])
+
+    def test_similarity_ignores_common_template_and_keeps_distinctive_overlap(self) -> None:
+        docs = [
+            ParsedDocument(file_id=f"F{i}", filename=f"{i}.pdf", file_type="投标文件", document_subtype="响应文件", text_length=500)
+            for i in range(1, 5)
+        ]
+        common = "投标人承诺遵守采购文件全部要求并对响应文件的真实性负责。"
+        unique = "项目实施过程中采用双周迭代机制由项目经理统一协调资源并形成阶段性交付成果。"
+        typo = "系统应具备统一身份正认功能实现用户角色和权限的统一管理。"
+        build = "本项目采用微服务架构提高系统扩展性和运行稳定性并建设统一服务治理体系。"
+        texts = {
+            "F1": common + "\n甲方采用独立技术路线并完成各阶段质量控制与验收工作。",
+            "F2": common + "\n" + unique + "\n" + typo + "\n" + build,
+            "F3": common + "\n" + unique + "\n" + typo + "\n" + build,
+            "F4": common + "\n乙方采用另一技术路线并形成独立的部署及运维实施方案。",
+        }
+        issues = self.agent._document_similarity_anomalies(docs, texts)
+        self.assertEqual(len(issues), 1)
+        self.assertIn("2.pdf", issues[0].source_file)
+        self.assertIn("3.pdf", issues[0].source_file)
+        self.assertTrue(issues[0].evidence)
+
+    def test_similarity_ignores_only_two_shared_template_like_lines(self) -> None:
+        docs = [
+            ParsedDocument(file_id=f"F{i}", filename=f"{i}.pdf", file_type="投标文件", document_subtype="响应文件", text_length=500)
+            for i in range(1, 3)
+        ]
+        first = "我公司已充分理解采购需求将遵循安全可靠可维护的建设原则完成平台升级。"
+        second = "采用分层架构与标准接口支持业务组件解耦横向扩展和统一运维。"
+        texts = {
+            "F1": first + "\n" + second + "\n甲方具有独立的实施计划和质量控制安排。",
+            "F2": first + "\n" + second + "\n乙方具有独立的项目组织和交付验收安排。",
+        }
+        self.assertEqual(self.agent._document_similarity_anomalies(docs, texts), [])
 
     def test_dify_and_deterministic_results_are_merged(self) -> None:
         self.doc.opening_records = [
