@@ -3,6 +3,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+API_CONTRACT_VERSION = "1.0.0"
+AGENT_CONTRACT_VERSION = "1.0.0"
+
 TaskStatus = Literal["pending", "running", "waiting_review", "completed", "failed"]
 ReportOutputType = Literal[
     "综合智能核验报告",
@@ -257,6 +260,7 @@ class TaskResult(BaseModel):
 
 
 class TaskRecord(BaseModel):
+    api_version: str = API_CONTRACT_VERSION
     task_id: str
     project_id: str
     project_name: str

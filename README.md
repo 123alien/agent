@@ -61,6 +61,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 http://localhost:8000/docs
 ```
 
+系统接入前可读取服务能力和冻结的接口版本：
+
+```text
+GET http://localhost:8000/api/agent/capabilities
+```
+
 打开可视化测试控制台：
 
 ```text

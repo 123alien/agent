@@ -2,6 +2,16 @@
 
 智能体服务作为独立 HTTP 服务运行。业务系统提交核验任务后保存 `task_id`，可以轮询任务状态，也可以提供 `callback_url` 接收完成通知。
 
+当前外部 API 和跨智能体契约版本均为 `1.0.0`。系统接入前可调用：
+
+```http
+GET /api/agent/capabilities
+X-API-Key: <AGENT_API_TOKEN>
+```
+
+该接口返回五个智能体、检查类型、报告类型、报告格式、任务状态、鉴权方式和回调能力。
+每个任务对象都包含 `api_version`，调用方发现不支持的主版本时应停止处理并告警。
+
 ## 推荐调用流程
 
 1. 业务系统生成招标文件、投标文件或评标报告的可访问 URL。
@@ -46,6 +56,7 @@ X-API-Key: <AGENT_API_TOKEN>
 
 ```json
 {
+  "api_version": "1.0.0",
   "task_id": "T123456789abc",
   "status": "pending",
   "callback_status": "pending",

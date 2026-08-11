@@ -11,6 +11,8 @@ from app.agents.supervisor import supervisor_agent
 from app.api.file_helpers import infer_file_type, safe_storage_name
 from app.core.config import ensure_data_dirs, settings
 from app.schemas.task import (
+    AGENT_CONTRACT_VERSION,
+    API_CONTRACT_VERSION,
     CreateUrlTaskRequest,
     ReviewRequest,
     TaskRecord,
@@ -27,6 +29,51 @@ from app.services.task_store import task_store
 from app.services.time_utils import now_iso
 
 router = APIRouter()
+
+
+@router.get("/capabilities")
+def get_capabilities() -> dict:
+    return {
+        "service": settings.app_name,
+        "api_version": API_CONTRACT_VERSION,
+        "agent_contract_version": AGENT_CONTRACT_VERSION,
+        "architecture": "FastAPI + LangGraph + Dify/RAG + deterministic tools",
+        "agents": [
+            {"id": "document", "name": "文档解析智能体"},
+            {"id": "compliance", "name": "合规审查智能体"},
+            {"id": "data", "name": "数据核验智能体"},
+            {"id": "anomaly", "name": "异常分析智能体"},
+            {"id": "report", "name": "报告生成智能体"},
+        ],
+        "check_types": ["auto", "full", "compliance", "data", "anomaly"],
+        "output_types": [
+            "综合智能核验报告",
+            "合规审查专项报告",
+            "数据核验专项报告",
+            "异常分析专项报告",
+            "整改建议报告",
+            "标准化评标报告",
+        ],
+        "template_types": [
+            "标准审查报告",
+            "简版管理层报告",
+            "详细审查报告",
+            "整改建议报告",
+            "标准化评标报告",
+        ],
+        "report_formats": ["json", "markdown", "docx", "pdf"],
+        "task_statuses": ["pending", "running", "waiting_review", "completed", "failed"],
+        "authentication": {
+            "enabled": bool(settings.agent_api_token),
+            "header": "X-API-Key",
+        },
+        "human_review": True,
+        "callback": {
+            "supported": True,
+            "signed": bool(settings.callback_secret),
+            "max_attempts": settings.callback_max_attempts,
+        },
+    }
 
 
 @router.post("/contracts/generate", response_model=ContractGenerationResult)
