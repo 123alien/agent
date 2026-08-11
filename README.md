@@ -150,6 +150,26 @@ python scripts/smoke_test.py
 
 测试会使用 `samples/demo_tender.txt` 创建一条核验任务，并输出任务状态、问题数量和报告路径。
 
+## 企业级多文件 Demo 数据集
+
+仓库提供一套可重复生成的“1 个采购项目 + 4 家供应商”测试数据，覆盖正常对照、
+设备与网络特征重合、文件雷同、报价规律、缺章、印章主体不一致和签名能力未配置等场景：
+
+```text
+test_data/enterprise_demo/
+```
+
+数据包同时包含 PDF、DOCX、电子交易与专家评分 Excel 以及机器可读预期结果。
+具体上传顺序、风险口径和验收标准见
+[Demo 数据集说明](test_data/enterprise_demo/README.md)。重新生成命令：
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\build_enterprise_demo.py
+```
+
+该数据集只用于发现风险线索和验证人工复核闭环，任何单一 IP、MAC、报价规律或
+文本相似信号都不得被直接表述为串通投标事实。
+
 ## 后续系统接入
 
 现有系统可以调用：

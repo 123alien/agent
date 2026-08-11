@@ -112,6 +112,8 @@ URL 提交、任务回调和人工复核的字段示例见 `docs/integration.md`
 - URL 文件任务可以完成并生成报告
 - DeepSeek 密钥曾使用无业务文档的一行 JSON 请求验证成功
 - FastAPI 服务健康检查与 OpenAPI 路由验证成功
+- 已建立 `test_data/enterprise_demo` 企业级多文件测试数据集，包含采购文件、四家虚拟供应商的 PDF/DOCX 响应文件、电子交易及专家评分 Excel、预期风险线索和可重复生成脚本
+- Demo 已覆盖正常对照、B/C 多信号重合、B/C 文本雷同、B/C/D 报价规律、D 缺章、D 印章主体不一致以及签名模型未配置等五智能体联调场景
 
 没有将 `samples/demo_tender.txt` 发送给外部 DeepSeek 服务，因为传输文档内容需要明确授权。因此，真实模型参与完整文档核验的端到端测试仍待执行。
 

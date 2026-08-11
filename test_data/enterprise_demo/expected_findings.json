@@ -1,0 +1,122 @@
+{
+  "dataset_version": "1.0.0",
+  "project": {
+    "project_id": "XXCG-2026-0811",
+    "project_name": "XX市信息化平台升级建设项目",
+    "control_price": 10000000
+  },
+  "principle": "发现线索、给出风险等级和证据并转人工复核，不直接认定串通投标。",
+  "expected_findings": [
+    {
+      "id": "F-001",
+      "agents": [
+        "数据核验智能体",
+        "异常分析智能体"
+      ],
+      "entities": [
+        "S002",
+        "S003"
+      ],
+      "signals": [
+        "upload_ip",
+        "mac_address",
+        "machine_code",
+        "cost_software_lock_id"
+      ],
+      "risk_level": "高",
+      "requires_human_review": true,
+      "expected_wording": "检测到多项疑似串通投标风险特征，建议人工进一步核验。"
+    },
+    {
+      "id": "F-002",
+      "agents": [
+        "文档解析智能体",
+        "异常分析智能体"
+      ],
+      "entities": [
+        "S002",
+        "S003"
+      ],
+      "signals": [
+        "文本高度相似",
+        "共同错字99.99%%",
+        "共同错字统一身份正认"
+      ],
+      "risk_level": "高",
+      "requires_human_review": true
+    },
+    {
+      "id": "F-003",
+      "agents": [
+        "数据核验智能体",
+        "异常分析智能体"
+      ],
+      "entities": [
+        "S002",
+        "S003",
+        "S004"
+      ],
+      "signals": [
+        "9600000",
+        "9800000",
+        "10000000"
+      ],
+      "risk_level": "中",
+      "requires_human_review": true
+    },
+    {
+      "id": "F-004",
+      "agents": [
+        "文档解析智能体"
+      ],
+      "entities": [
+        "S004"
+      ],
+      "page": 8,
+      "expected_status": "not_detected",
+      "requires_human_review": true
+    },
+    {
+      "id": "F-005",
+      "agents": [
+        "文档解析智能体"
+      ],
+      "entities": [
+        "S004"
+      ],
+      "page": 12,
+      "expected_status": [
+        "mismatch",
+        "low_confidence"
+      ],
+      "requires_human_review": true
+    },
+    {
+      "id": "F-006",
+      "agents": [
+        "文档解析智能体"
+      ],
+      "entities": [
+        "S004"
+      ],
+      "page": 15,
+      "expected_status": "not_checked",
+      "forbidden_wording": "未签字",
+      "requires_human_review": true
+    },
+    {
+      "id": "F-007",
+      "agents": [
+        "合规审查智能体"
+      ],
+      "entities": [
+        "采购文件"
+      ],
+      "signals": [
+        "注册地址必须位于本市",
+        "指定城市云眼V5且不接受同等产品"
+      ],
+      "requires_human_review": true
+    }
+  ]
+}
