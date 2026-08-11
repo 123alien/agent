@@ -77,6 +77,11 @@ class Settings:
         if host.strip()
     )
     callback_timeout_seconds: int = int(os.getenv("CALLBACK_TIMEOUT_SECONDS", "10"))
+    callback_max_attempts: int = max(1, int(os.getenv("CALLBACK_MAX_ATTEMPTS", "3")))
+    callback_retry_base_seconds: float = max(
+        0.0, float(os.getenv("CALLBACK_RETRY_BASE_SECONDS", "1"))
+    )
+    callback_secret: str = os.getenv("CALLBACK_SECRET", "")
     callback_allowed_hosts: tuple[str, ...] = tuple(
         host.strip().lower()
         for host in os.getenv("CALLBACK_ALLOWED_HOSTS", "").split(",")

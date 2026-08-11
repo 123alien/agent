@@ -7,10 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.main import app
+from app.core.config import settings
 
 
 def main() -> None:
     client = TestClient(app)
+    headers = {"X-API-Key": settings.agent_api_token} if settings.agent_api_token else {}
     sample_path = Path("samples/demo_tender.txt")
     response = client.post(
         "/api/agent/tasks",
@@ -29,11 +31,12 @@ def main() -> None:
                 ),
             )
         ],
+        headers=headers,
     )
     response.raise_for_status()
     task_id = response.json()["task_id"]
 
-    task_response = client.get(f"/api/agent/tasks/{task_id}")
+    task_response = client.get(f"/api/agent/tasks/{task_id}", headers=headers)
     task_response.raise_for_status()
     task = task_response.json()
 
@@ -50,9 +53,10 @@ def main() -> None:
                     for issue in task["review_request"]["issues"]
                 ],
             },
+            headers=headers,
         )
         review_response.raise_for_status()
-        task = client.get(f"/api/agent/tasks/{task_id}").json()
+        task = client.get(f"/api/agent/tasks/{task_id}", headers=headers).json()
 
     print("task_id:", task_id)
     print("status:", task["status"])
@@ -61,7 +65,7 @@ def main() -> None:
     for issue in task["result"]["issues"]:
         print("-", issue["agent"], issue["risk_level"], issue["issue_type"])
 
-    report_response = client.get(f"/api/agent/tasks/{task_id}/report")
+    report_response = client.get(f"/api/agent/tasks/{task_id}/report", headers=headers)
     report_response.raise_for_status()
     print("report:", f"data/reports/{task_id}.md")
 

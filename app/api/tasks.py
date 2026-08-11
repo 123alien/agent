@@ -205,13 +205,31 @@ def resume_task(task_id: str, review: dict) -> None:
 def send_callback(task: TaskRecord) -> None:
     if task.callback_url:
         try:
-            send_task_callback(task)
+            task.callback_attempts = send_task_callback(task)
             task.callback_status = "sent"
             task.callback_error = ""
         except Exception as exc:
+            task.callback_attempts = settings.callback_max_attempts
             task.callback_status = "failed"
             task.callback_error = str(exc)
         task_store.save(task)
+
+
+@router.post("/tasks/{task_id}/callback/retry", status_code=202)
+def retry_callback(task_id: str, background_tasks: BackgroundTasks) -> dict:
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not task.callback_url:
+        raise HTTPException(status_code=409, detail="任务未配置回调地址")
+    if task.status not in {"completed", "failed"}:
+        raise HTTPException(status_code=409, detail="任务尚未进入可回调的终态")
+    task.callback_status = "pending"
+    task.callback_error = ""
+    task.callback_attempts = 0
+    task_store.save(task)
+    background_tasks.add_task(send_callback, task)
+    return {"status": "accepted", "task_id": task_id}
 
 
 @router.post("/tasks", response_model=TaskRecord)

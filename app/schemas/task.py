@@ -275,6 +275,7 @@ class TaskRecord(BaseModel):
         "not_configured"
     )
     callback_error: str = ""
+    callback_attempts: int = 0
     created_at: str
     updated_at: str
 

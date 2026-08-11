@@ -211,6 +211,9 @@ X-API-Key: ******
 ```dotenv
 REMOTE_FILE_ALLOWED_HOSTS=files.example.com,10.0.0.20
 CALLBACK_ALLOWED_HOSTS=business.example.com,10.0.0.10
+CALLBACK_MAX_ATTEMPTS=3
+CALLBACK_RETRY_BASE_SECONDS=1
+CALLBACK_SECRET=请替换为独立随机密钥
 ```
 
 更完整的请求和人工复核格式见 `docs/integration.md`。

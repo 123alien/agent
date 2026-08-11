@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 from app.api.file_helpers import infer_file_type
 from app.main import app
+from app.core.config import settings
 from app.schemas.task import RemoteFileInput, UploadedFileInfo
 
 
@@ -30,6 +31,7 @@ async def fake_download(
 
 def main() -> None:
     client = TestClient(app)
+    headers = {"X-API-Key": settings.agent_api_token} if settings.agent_api_token else {}
     payload = {
         "project_id": "P-INTEGRATION-001",
         "project_name": "远程文件接入测试项目",
@@ -43,11 +45,11 @@ def main() -> None:
         ],
     }
     with patch("app.api.tasks.download_remote_file", new=fake_download):
-        response = client.post("/api/agent/tasks/from-urls", json=payload)
+        response = client.post("/api/agent/tasks/from-urls", json=payload, headers=headers)
 
     response.raise_for_status()
     created_task = response.json()
-    task_response = client.get(f"/api/agent/tasks/{created_task['task_id']}")
+    task_response = client.get(f"/api/agent/tasks/{created_task['task_id']}", headers=headers)
     task_response.raise_for_status()
     task = task_response.json()
     if task["status"] == "waiting_review":
@@ -63,9 +65,10 @@ def main() -> None:
                     for issue in task["review_request"]["issues"]
                 ],
             },
+            headers=headers,
         )
         review_response.raise_for_status()
-        task = client.get(f"/api/agent/tasks/{task['task_id']}").json()
+        task = client.get(f"/api/agent/tasks/{task['task_id']}", headers=headers).json()
     assert task["status"] == "completed"
     assert task["files"][0]["source_url"] == payload["files"][0]["url"]
     assert task["result"] is not None
