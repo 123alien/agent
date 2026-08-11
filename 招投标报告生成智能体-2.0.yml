@@ -1,0 +1,610 @@
+app:
+  description: 集成文档解析、合规审查、数据核验、异常分析及人工复核结果，生成结构化评标智能核验报告。
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: workflow
+  name: 招投标报告生成智能体-2.0
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.19@1aa3c64e2f50179afe8410ad79412dab92bf5919a27da8e2b13071b5e5f8ce81
+    version: null
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: code
+      id: report-start-source-report-normalize-target
+      source: report-start
+      sourceHandle: source
+      target: report-normalize
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: report-normalize-source-report-plan-target
+      source: report-normalize
+      sourceHandle: source
+      target: report-plan
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: report-plan-source-report-validate-target
+      source: report-plan
+      sourceHandle: source
+      target: report-validate
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: end
+      id: report-validate-source-report-end-target
+      source: report-validate
+      sourceHandle: source
+      target: report-end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables:
+        - default: 综合智能核验报告
+          hint: ''
+          label: 输出文档类型
+          options:
+          - 综合智能核验报告
+          - 合规审查专项报告
+          - 数据核验专项报告
+          - 异常分析专项报告
+          - 整改建议报告
+          - 标准化评标报告
+          placeholder: ''
+          required: true
+          type: select
+          variable: output_type
+        - default: ''
+          hint: 项目编号、项目名称、采购人、代理机构、采购方式等
+          label: 项目基本信息JSON
+          options: []
+          placeholder: ''
+          required: true
+          type: json_object
+          variable: project_info
+        - default: ''
+          hint: 文档解析智能体输出
+          label: 文档解析结果JSON
+          max_length: 50000
+          options: []
+          placeholder: ''
+          required: true
+          type: paragraph
+          variable: parsed_documents
+        - default: ''
+          hint: 合规审查智能体输出
+          label: 合规审查结果JSON
+          max_length: 50000
+          options: []
+          placeholder: ''
+          required: true
+          type: paragraph
+          variable: compliance_results
+        - default: ''
+          hint: 数据核验智能体输出
+          label: 数据核验结果JSON
+          max_length: 50000
+          options: []
+          placeholder: ''
+          required: true
+          type: paragraph
+          variable: validation_results
+        - default: ''
+          hint: 异常分析智能体输出
+          label: 异常分析结果JSON
+          max_length: 50000
+          options: []
+          placeholder: ''
+          required: true
+          type: paragraph
+          variable: anomaly_results
+        - default: ''
+          hint: 可为空；包含复核决定、复核人、确认状态等
+          label: 人工复核结果JSON
+          max_length: 30000
+          options: []
+          placeholder: ''
+          required: false
+          type: paragraph
+          variable: human_review_data
+        - default: 标准审查报告
+          hint: ''
+          label: 文档模板
+          options:
+          - 标准审查报告
+          - 简版管理层报告
+          - 详细审查报告
+          - 整改建议报告
+          - 标准化评标报告
+          placeholder: ''
+          required: true
+          type: select
+          variable: template_type
+      height: 290
+      id: report-start
+      position:
+        x: 80
+        y: 260
+      positionAbsolute:
+        x: 80
+        y: 260
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    - data:
+        code: |
+          import json
+
+          def parse_json(value, default):
+              if value is None or value == "":
+                  return default
+              if isinstance(value, (dict, list)):
+                  return value
+              try:
+                  return json.loads(value)
+              except (json.JSONDecodeError, TypeError, ValueError):
+                  return default
+
+          def main(output_type, project_info, parsed_documents,
+                   compliance_results, validation_results, anomaly_results,
+                   human_review_data, template_type):
+              project = parse_json(project_info, {})
+              parsed = parse_json(parsed_documents, {})
+              compliance = parse_json(compliance_results, {"summary": "", "issues": []})
+              validation = parse_json(validation_results, {"summary": "", "issues": []})
+              anomaly = parse_json(anomaly_results, {"summary": "", "anomalies": []})
+              human_review = parse_json(human_review_data, {})
+
+              output_instructions = {
+                  "综合智能核验报告": "综合汇总全部智能体结论，形成完整的《评标智能核验报告》。",
+                  "合规审查专项报告": "重点呈现合规问题、原文证据、依据、建议和待复核事项。",
+                  "数据核验专项报告": "重点呈现字段冲突、计算错误、评分复算和排序核验结果。",
+                  "异常分析专项报告": "重点呈现跨文件、跨主体、多信号组合及专家打分异常线索。",
+                  "整改建议报告": "按风险等级和整改优先级组织问题及可执行整改建议。",
+                  "标准化评标报告": "根据已经确认的可靠数据规划标准化《评标报告》；未确认内容必须标记待确认。",
+              }
+              template_instructions = {
+                  "标准审查报告": "采用完整、正式的核验报告结构。",
+                  "简版管理层报告": "突出结论、风险数量、重大问题和管理建议。",
+                  "详细审查报告": "逐项呈现问题、证据、依据、建议和复核状态。",
+                  "整改建议报告": "按照问题、整改措施、优先级和复核要求组织。",
+                  "标准化评标报告": "采用标准评标报告章节，但不得写入未经确认的事实。",
+              }
+              normalized = {
+                  "output_type": output_type,
+                  "template_type": template_type,
+                  "project_info": project,
+                  "parsed_documents": parsed,
+                  "compliance_results": compliance,
+                  "validation_results": validation,
+                  "anomaly_results": anomaly,
+                  "human_review_data": human_review,
+              }
+              return {
+                  "normalized_input": json.dumps(normalized, ensure_ascii=False),
+                  "output_instruction": output_instructions.get(output_type, output_instructions["综合智能核验报告"]),
+                  "template_instruction": template_instructions.get(template_type, template_instructions["标准审查报告"]),
+              }
+        code_language: python3
+        outputs:
+          normalized_input:
+            children: null
+            type: string
+          output_instruction:
+            children: null
+            type: string
+          template_instruction:
+            children: null
+            type: string
+        selected: false
+        title: 输入标准化
+        type: code
+        variables:
+        - value_selector: [report-start, output_type]
+          value_type: string
+          variable: output_type
+        - value_selector: [report-start, project_info]
+          value_type: object
+          variable: project_info
+        - value_selector: [report-start, parsed_documents]
+          value_type: string
+          variable: parsed_documents
+        - value_selector: [report-start, compliance_results]
+          value_type: string
+          variable: compliance_results
+        - value_selector: [report-start, validation_results]
+          value_type: string
+          variable: validation_results
+        - value_selector: [report-start, anomaly_results]
+          value_type: string
+          variable: anomaly_results
+        - value_selector: [report-start, human_review_data]
+          value_type: string
+          variable: human_review_data
+        - value_selector: [report-start, template_type]
+          value_type: string
+          variable: template_type
+      height: 54
+      id: report-normalize
+      position:
+        x: 390
+        y: 280
+      positionAbsolute:
+        x: 390
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.1
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: report-system-prompt
+          role: system
+          text: |
+            你是招投标报告生成智能体的报告内容规划模块。
+
+            你只负责根据输入数据规划报告标题、摘要和章节，不负责生成Word或PDF文件。
+
+            规则：
+            1. 不得新增输入中不存在的问题、主体、金额、日期、法规、证据或结论。
+            2. 人工复核结论优先于自动分析；被确认误判的项目不得进入问题清单。
+            3. 不得改写原始 evidence；不得把待确认事项表述为确定事实。
+            4. 字段冲突或缺失不得自行选择值，必须放入 conflicts 或 missing_fields。
+            5. 标准化评标报告中的事实必须已有可靠数据或人工确认支持。
+            6. 输出内容应适合后端生成正式Word和PDF。
+            7. 只输出合法JSON，不得输出Markdown、代码围栏或解释文字。
+
+            输出格式：
+            {
+              "report_title": "string",
+              "executive_summary": "string",
+              "sections": [
+                {
+                  "section_id": "string",
+                  "title": "string",
+                  "content": "string",
+                  "source_types": ["parsed_documents|compliance|validation|anomaly|human_review"]
+                }
+              ],
+              "missing_fields": ["string"],
+              "conflicts": ["string"],
+              "rectification_suggestions": ["string"]
+            }
+        - id: report-user-prompt
+          role: user
+          text: |
+            【输出任务】
+            {{#report-normalize.output_instruction#}}
+
+            【模板要求】
+            {{#report-normalize.template_instruction#}}
+
+            【标准化输入数据】
+            {{#report-normalize.normalized_input#}}
+
+            请生成报告内容规划JSON。
+        selected: false
+        title: 报告内容规划
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: report-plan
+      position:
+        x: 700
+        y: 280
+      positionAbsolute:
+        x: 700
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    - data:
+        code: |
+          import json
+          import re
+
+          def parse_json(value, default):
+              if value is None or value == "":
+                  return default
+              if isinstance(value, (dict, list)):
+                  return value
+              text = str(value).strip()
+              text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+              text = re.sub(r"\s*```$", "", text)
+              try:
+                  return json.loads(text)
+              except (json.JSONDecodeError, TypeError, ValueError):
+                  return default
+
+          def list_value(value):
+              return value if isinstance(value, list) else []
+
+          def source_items(data, key, source):
+              if not isinstance(data, dict):
+                  return []
+              result = []
+              for index, item in enumerate(list_value(data.get(key))):
+                  if not isinstance(item, dict):
+                      continue
+                  if item.get("is_issue") is False or item.get("is_anomaly") is False:
+                      continue
+                  copied = dict(item)
+                  copied["source_type"] = source
+                  copied["issue_id"] = str(copied.get("issue_id") or copied.get("anomaly_id") or f"{source}-{index + 1}")
+                  evidence = copied.get("evidence", [])
+                  if isinstance(evidence, str):
+                      evidence = [evidence]
+                  copied["evidence"] = [str(x) for x in evidence if str(x).strip()]
+                  copied["risk_level"] = str(copied.get("risk_level", "中"))
+                  copied["issue_type"] = str(copied.get("issue_type") or copied.get("anomaly_type") or "待分类问题")
+                  copied["description"] = str(copied.get("description", ""))
+                  copied["basis"] = str(copied.get("basis", ""))
+                  copied["suggestion"] = str(copied.get("suggestion", ""))
+                  copied["requires_human_review"] = bool(copied.get("requires_human_review", False))
+                  copied.pop("is_issue", None)
+                  copied.pop("is_anomaly", None)
+                  copied.pop("anomaly_id", None)
+                  result.append(copied)
+              return result
+
+          def review_map(review):
+              if not isinstance(review, dict):
+                  return {}
+              decisions = review.get("decisions") or review.get("items") or review.get("issues") or review.get("reviews") or []
+              result = {}
+              for item in list_value(decisions):
+                  if not isinstance(item, dict):
+                      continue
+                  issue_id = str(item.get("issue_id") or item.get("anomaly_id") or "")
+                  if issue_id:
+                      result[issue_id] = item
+              return result
+
+          def main(normalized_input, model_text):
+              normalized = parse_json(normalized_input, {})
+              plan = parse_json(model_text, {})
+              compliance = normalized.get("compliance_results", {})
+              validation = normalized.get("validation_results", {})
+              anomaly = normalized.get("anomaly_results", {})
+              review = normalized.get("human_review_data", {})
+
+              issues = []
+              issues.extend(source_items(compliance, "issues", "compliance"))
+              issues.extend(source_items(validation, "issues", "validation"))
+              issues.extend(source_items(anomaly, "anomalies", "anomaly"))
+
+              decisions = review_map(review)
+              retained = []
+              for item in issues:
+                  decision = decisions.get(item["issue_id"], {})
+                  status = str(decision.get("decision") or decision.get("status") or "").lower()
+                  false_positive = decision.get("false_positive") is True or status in {
+                      "false_positive", "误判", "不成立", "排除"
+                  }
+                  if false_positive:
+                      continue
+                  if decision:
+                      item["review_decision"] = str(decision.get("decision") or decision.get("status") or "已复核")
+                      if decision.get("corrected_description"):
+                          item["description"] = str(decision["corrected_description"])
+                      if decision.get("corrected_suggestion"):
+                          item["suggestion"] = str(decision["corrected_suggestion"])
+                      item["requires_human_review"] = False
+                  else:
+                      item["review_decision"] = "待复核" if item["requires_human_review"] else "自动核验"
+                  retained.append(item)
+
+              counts = {"high": 0, "medium": 0, "low": 0, "total": len(retained)}
+              for item in retained:
+                  level = item.get("risk_level", "中")
+                  if level in ("高", "high", "HIGH"):
+                      counts["high"] += 1
+                  elif level in ("低", "low", "LOW"):
+                      counts["low"] += 1
+                  else:
+                      counts["medium"] += 1
+
+              pending = [x for x in retained if x.get("requires_human_review")]
+              output_type = str(normalized.get("output_type", "综合智能核验报告"))
+              committee_confirmed = isinstance(review, dict) and review.get("committee_confirmed") is True
+              if output_type == "标准化评标报告":
+                  report_status = "正式版" if committee_confirmed and not pending else "标准化评标报告待确认版"
+              else:
+                  report_status = "待复核版" if pending else "正式核验版"
+
+              sections = []
+              for section in list_value(plan.get("sections")):
+                  if not isinstance(section, dict):
+                      continue
+                  sections.append({
+                      "section_id": str(section.get("section_id", "")),
+                      "title": str(section.get("title", "")),
+                      "content": str(section.get("content", "")),
+                      "source_types": [str(x) for x in list_value(section.get("source_types"))],
+                  })
+
+              project = normalized.get("project_info", {})
+              project_name = str(project.get("project_name") or project.get("name") or "未命名项目") if isinstance(project, dict) else "未命名项目"
+              title = f"{project_name}{output_type}"
+              summary = (
+                  f"本次核验共发现{len(retained)}项明确或潜在问题，"
+                  f"其中高风险{counts['high']}项、中风险{counts['medium']}项、"
+                  f"低风险{counts['low']}项，尚有{len(pending)}项需要人工复核。"
+              )
+
+              parsed = normalized.get("parsed_documents", {})
+              explicit_missing = []
+              if isinstance(parsed, dict):
+                  explicit_missing = [str(x) for x in list_value(parsed.get("missing_fields"))]
+
+              explicit_conflicts = []
+              for item in retained:
+                  if item.get("source_type") != "validation":
+                      continue
+                  field_name = str(item.get("field_name", "")).strip()
+                  value_1 = str(item.get("value_1", "")).strip()
+                  value_2 = str(item.get("value_2", "")).strip()
+                  if field_name and value_1 and value_2:
+                      explicit_conflicts.append(f"{field_name}：{value_1} / {value_2}")
+
+              suggestions = []
+              for item in retained:
+                  suggestion = str(item.get("suggestion", "")).strip()
+                  if suggestion and suggestion not in suggestions:
+                      suggestions.append(suggestion)
+              result = {
+                  "report_title": title,
+                  "report_type": output_type,
+                  "report_status": report_status,
+                  "template_type": str(normalized.get("template_type", "标准审查报告")),
+                  "project_info": project,
+                  "executive_summary": summary,
+                  "risk_statistics": counts,
+                  "sections": sections,
+                  "issues": retained,
+                  "pending_review_items": [x["issue_id"] for x in pending],
+                  "missing_fields": explicit_missing,
+                  "conflicts": explicit_conflicts,
+                  "rectification_suggestions": suggestions,
+                  "human_review": review,
+                  "committee_confirmation_required": output_type == "标准化评标报告" and not committee_confirmed,
+              }
+              return {"result": result}
+        code_language: python3
+        outputs:
+          result:
+            children: null
+            type: object
+        selected: false
+        title: 报告结果校验
+        type: code
+        variables:
+        - value_selector: [report-normalize, normalized_input]
+          value_type: string
+          variable: normalized_input
+        - value_selector: [report-plan, text]
+          value_type: string
+          variable: model_text
+      height: 54
+      id: report-validate
+      position:
+        x: 1010
+        y: 280
+      positionAbsolute:
+        x: 1010
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    - data:
+        outputs:
+        - value_selector: [report-validate, result]
+          variable: result
+        selected: false
+        title: 输出
+        type: end
+      height: 90
+      id: report-end
+      position:
+        x: 1320
+        y: 280
+      positionAbsolute:
+        x: 1320
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.8
+  rag_pipeline_variables: []

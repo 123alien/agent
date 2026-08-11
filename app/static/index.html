@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>评标智能核验控制台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">核</span><div><strong>评标智能核验</strong><small>多智能体测试控制台</small></div></div>
+      <button class="primary wide" id="newTaskBtn">＋ 新建核验任务</button>
+      <div class="side-heading"><span>最近任务</span><button class="icon-btn" id="refreshTasks" title="刷新">↻</button></div>
+      <div id="taskList" class="task-list"><div class="empty-side">暂无任务</div></div>
+      <div class="side-footer"><span class="health-dot" id="healthDot"></span><span id="healthText">正在连接服务</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><p class="eyebrow">AI PROCUREMENT REVIEW</p><h1>智能核验工作台</h1></div>
+        <div class="top-actions"><a href="/docs" target="_blank" class="ghost">API 文档</a><button class="ghost" id="lookupBtn">查询任务</button></div>
+      </header>
+
+      <section id="createView" class="view active">
+        <div class="intro"><h2>上传项目资料，启动五智能体协同核验</h2><p>支持 PDF、DOCX、TXT、XLSX 等文件。系统将自动完成解析、合规审查、数据核验、异常分析与报告生成。</p></div>
+        <form id="uploadForm" class="panel upload-panel">
+          <div class="form-grid">
+            <label><span>项目编号</span><input name="project_id" id="projectId" required placeholder="例如：P-2026-001"></label>
+            <label><span>项目名称</span><input name="project_name" required placeholder="请输入采购项目名称"></label>
+            <label><span>核验模式</span><select name="check_type"><option value="auto">自动识别（推荐）</option><option value="full">完整核验</option><option value="compliance">仅合规审查</option><option value="data">仅数据核验</option><option value="anomaly">仅异常分析</option></select></label>
+          </div>
+          <div class="form-grid report-options">
+            <label><span>输出文档类型</span><select name="output_type"><option>综合智能核验报告</option><option>合规审查专项报告</option><option>数据核验专项报告</option><option>异常分析专项报告</option><option>整改建议报告</option><option>标准化评标报告</option></select></label>
+            <label><span>文档模板</span><select name="template_type"><option>标准审查报告</option><option>简版管理层报告</option><option>详细审查报告</option><option>整改建议报告</option><option>标准化评标报告</option></select></label>
+            <label><span>生成说明</span><input value="报告类型控制内容范围，模板控制篇幅与版式" disabled></label>
+          </div>
+          <details class="system-record-panel">
+            <summary>业务系统基准数据（可选）</summary>
+            <p>用于核对评标报告与采购业务系统记录是否一致。请填写 JSON 对象；留空则只进行文件之间的比对。</p>
+            <textarea name="system_record" rows="7" spellcheck="false" placeholder='{"project_name":"某项目","tenderer":"某采购单位","budget":"120万元","price_limit":"100万元","deadline":"2026-09-15 09:30"}'>{}</textarea>
+          </details>
+          <div class="dropzone" id="dropzone">
+            <input type="file" name="files" id="files" multiple required accept=".pdf,.docx,.txt,.md,.xlsx,.xls,.csv,.json">
+            <div class="upload-icon">⇧</div><h3>拖拽文件到这里，或点击选择</h3><p>可一次上传采购文件、响应文件、评标报告和评分表</p>
+            <div id="fileChips" class="file-chips"></div>
+          </div>
+          <div class="submit-row"><span id="formMessage"></span><button class="primary" type="submit" id="submitBtn">开始智能核验 →</button></div>
+        </form>
+        <div class="agent-grid">
+          <article><b>01</b><h3>文档解析</h3><p>章节、表格、字段、OCR与版面信息</p></article>
+          <article><b>02</b><h3>合规审查</h3><p>法规依据、废标理由与程序完整性</p></article>
+          <article><b>03</b><h3>数据核验</h3><p>报价、得分、权重、排名复算比对</p></article>
+          <article><b>04</b><h3>异常分析</h3><p>偏离度、雷同文件与主体关联线索</p></article>
+          <article><b>05</b><h3>报告生成</h3><p>汇总问题、建议及标准化报告</p></article>
+        </div>
+      </section>
+
+      <section id="resultView" class="view">
+        <div class="result-head"><div><button class="back-link" id="backBtn">← 返回新建任务</button><h2 id="resultTitle">任务详情</h2><p id="resultMeta"></p></div><div id="statusBadge" class="status-badge">读取中</div></div>
+        <div class="progress-panel panel"><div class="progress-top"><strong id="progressText">正在获取任务状态</strong><span id="elapsedText"></span></div><div class="progress-track"><div id="progressBar"></div></div><div id="agentSteps" class="agent-steps"></div></div>
+        <div id="metrics" class="metrics"></div>
+        <div class="tabs"><button class="active" data-tab="overview">解析概览</button><button data-tab="fields">关键字段</button><button data-tab="issues">问题清单 <span id="issueCount">0</span></button><button data-tab="agents">智能体结果</button><button data-tab="raw">原始 JSON</button></div>
+        <div class="panel tab-content" id="tabContent"></div>
+        <div class="download-bar" id="downloadBar"><strong>核验报告</strong><span>任务完成后可下载标准化报告</span><div><a id="mdDownload">Markdown</a><a id="docxDownload">Word</a><a id="pdfDownload">PDF</a></div></div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+请逐项审查以下候选条款。
+
+【供应商资格候选】
+在这里插入“候选分类 / qualification_candidates”变量
+
+【供应商资格法规依据】
+在这里插入“资格法规检索 / result”变量
+
+【品牌和技术候选】
+在这里插入“候选分类 / technical_candidates”变量
+
+【品牌和技术法规依据】
+在这里插入“技术法规检索 / result”变量
+
+【评分标准候选】
+在这里插入“候选分类 / scoring_candidates”变量
+
+【评分标准法规依据】
+在这里插入“评分法规检索 / result”变量
+
+【程序和合同候选】
+在这里插入“候选分类 / procedure_candidates”变量
+
+【程序和合同法规依据】
+在这里插入“程序法规检索 / result”变量
+
+输出 summary 和 issues。issues 中每项包含：
+risk_level、issue_type、description、evidence、basis、suggestion、requires_human_review。

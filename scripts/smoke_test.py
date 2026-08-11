@@ -37,6 +37,23 @@ def main() -> None:
     task_response.raise_for_status()
     task = task_response.json()
 
+    if task["status"] == "waiting_review":
+        review_response = client.post(
+            f"/api/agent/tasks/{task_id}/review",
+            json={
+                "reviewer": "smoke-test",
+                "items": [
+                    {
+                        "issue_id": issue["issue_id"],
+                        "decision": "正确",
+                    }
+                    for issue in task["review_request"]["issues"]
+                ],
+            },
+        )
+        review_response.raise_for_status()
+        task = client.get(f"/api/agent/tasks/{task_id}").json()
+
     print("task_id:", task_id)
     print("status:", task["status"])
     print("summary:", task["result"]["summary"])

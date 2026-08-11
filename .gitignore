@@ -7,4 +7,15 @@ data/uploads/
 data/tasks/
 data/reports/
 data/reviews/
+data/contracts/
+data/server.*.log
+data/*.sqlite*
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+*.tmp
+*.bak
 

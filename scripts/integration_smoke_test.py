@@ -50,6 +50,22 @@ def main() -> None:
     task_response = client.get(f"/api/agent/tasks/{created_task['task_id']}")
     task_response.raise_for_status()
     task = task_response.json()
+    if task["status"] == "waiting_review":
+        review_response = client.post(
+            f"/api/agent/tasks/{task['task_id']}/review",
+            json={
+                "reviewer": "integration-smoke-test",
+                "items": [
+                    {
+                        "issue_id": issue["issue_id"],
+                        "decision": "正确",
+                    }
+                    for issue in task["review_request"]["issues"]
+                ],
+            },
+        )
+        review_response.raise_for_status()
+        task = client.get(f"/api/agent/tasks/{task['task_id']}").json()
     assert task["status"] == "completed"
     assert task["files"][0]["source_url"] == payload["files"][0]["url"]
     assert task["result"] is not None

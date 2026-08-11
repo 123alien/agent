@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "document-context-v1.schema.json",
+  "title": "DocumentContext v1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "document_id",
+    "file_name",
+    "file_hash",
+    "document_type",
+    "raw_text",
+    "sections",
+    "tables",
+    "key_fields",
+    "clause_groups",
+    "entities",
+    "file_metadata",
+    "quality"
+  ],
+  "properties": {
+    "contract_version": {"const": "1.0.0"},
+    "document_id": {"type": "string", "minLength": 1},
+    "file_name": {"type": "string", "minLength": 1},
+    "file_hash": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+    "document_type": {"type": "string", "minLength": 1},
+    "raw_text": {"type": "string"},
+    "sections": {"type": "array", "items": {"type": "object"}},
+    "tables": {"type": "array", "items": {"type": "object"}},
+    "key_fields": {"type": "object"},
+    "clause_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["qualification", "technical", "scoring", "procedure_contract"],
+      "properties": {
+        "qualification": {"type": "array", "items": {"type": "object"}},
+        "technical": {"type": "array", "items": {"type": "object"}},
+        "scoring": {"type": "array", "items": {"type": "object"}},
+        "procedure_contract": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "entities": {"type": "object"},
+    "file_metadata": {"type": "object"},
+    "quality": {
+      "type": "object",
+      "required": ["parse_status", "warnings", "requires_human_review"],
+      "properties": {
+        "parse_status": {"enum": ["success", "warning", "failed"]},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "requires_human_review": {"type": "boolean"}
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-issue-v1.schema.json",
+  "title": "AgentIssue v1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issue_id",
+    "agent",
+    "risk_level",
+    "issue_type",
+    "description",
+    "evidence",
+    "basis",
+    "suggestion",
+    "assessment",
+    "confidence",
+    "requires_human_review"
+  ],
+  "properties": {
+    "issue_id": {"type": "string", "minLength": 1},
+    "agent": {"enum": ["compliance", "data", "anomaly", "human_review"]},
+    "risk_level": {"enum": ["高", "中", "低"]},
+    "issue_type": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/evidenceRef"}
+    },
+    "basis": {"type": "string"},
+    "suggestion": {"type": "string"},
+    "assessment": {"enum": ["明确问题", "待人工判断"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "requires_human_review": {"type": "boolean"},
+    "rule_id": {"type": "string"}
+  },
+  "$defs": {
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document_id", "quote", "page", "section", "source_type", "derived_from"],
+      "properties": {
+        "document_id": {"type": "string", "minLength": 1},
+        "quote": {"type": "string", "minLength": 1},
+        "page": {"type": ["integer", "null"], "minimum": 1},
+        "section": {"type": "string"},
+        "source_type": {"enum": ["text", "table", "metadata", "derived"]},
+        "derived_from": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

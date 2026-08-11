@@ -1,0 +1,13 @@
+services:
+  agent:
+    build: .
+    container_name: tender-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      DATA_DIR: /app/data

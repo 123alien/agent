@@ -26,9 +26,37 @@ class TaskStore:
             return None
         return TaskRecord.model_validate_json(path.read_text(encoding="utf-8"))
 
-    def save_review(self, task_id: str, payload: dict) -> Path:
+    def list_recent(self, limit: int = 20) -> list[TaskRecord]:
+        tasks: list[TaskRecord] = []
+        paths = sorted(
+            settings.tasks_dir.glob("T*.json"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        for path in paths[: max(1, min(limit, 100))]:
+            try:
+                tasks.append(TaskRecord.model_validate_json(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
+        return tasks
+
+    def load_review(self, task_id: str) -> dict:
         path = settings.reviews_dir / f"{task_id}.json"
-        data = {"task_id": task_id, "created_at": now_iso(), "review": payload}
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8")).get("review", {})
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def save_review(self, task_id: str, payload: dict, status: str = "draft") -> Path:
+        path = settings.reviews_dir / f"{task_id}.json"
+        data = {
+            "task_id": task_id,
+            "updated_at": now_iso(),
+            "status": status,
+            "review": payload,
+        }
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 

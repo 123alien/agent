@@ -63,7 +63,15 @@ Dify 应负责可视化工作流、提示词、模型、知识库、RAG 和节�
 - `app/api/tasks.py`：业务系统接入 API
 - `app/services/llm_client.py`：OpenAI 兼容的大模型调用客户端
 
-当前 `SupervisorAgent` 按顺序调用五个智能体并汇总结构化问题清单。合规审查支持在规则检测基础上调用 DeepSeek；其余部分目前主要是启发式规则和确定性程序，仍需继续增强。
+当前 `SupervisorAgent` 已使用 LangGraph `StateGraph` 管理共享状态，并根据
+`check_type` 动态路由合规审查、数据核验和异常分析节点，最后统一生成报告。
+合规审查优先调用已发布的 Dify Workflow 和 DeepSeek，调用失败时回退到本地规则；
+专项结果进入结果复核智能体，校验证据、人工复核标记并去重，不合格时最多退回
+原专项智能体一次。其余部分目前主要是启发式规则和确定性程序，仍需继续增强。
+
+高风险问题会通过 LangGraph `interrupt()` 暂停，任务进入 `waiting_review`。
+图状态保存在 `data/langgraph_checkpoints.sqlite`；人工复核接口使用相同任务编号和
+`Command(resume=...)` 恢复执行，因此服务重启后仍可继续生成最终报告。
 
 ## 4. 已有接口
 
@@ -137,7 +145,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 6. 创建“招投标智能核验”Workflow。
 7. 建立文档解析、合规审查、数据核验、异常分析和报告生成节点。
 8. 发布 Workflow 并获取 Dify 应用 API Key。
-9. 在本项目中增加 `DIFY_BASE_URL`、`DIFY_API_KEY` 等配置。
+9. 在本项目中增加 `DIFY_BASE_URL`、`DIFY_COMPLIANCE_API_KEY` 和
+   `DIFY_DOCUMENT_PARSER_API_KEY` 等配置。
 10. 新增 Dify 客户端，让 `SupervisorAgent` 调用 Dify Workflow API。
 
 建议先创建一个总工作流，不要一开始就拆成五个完全独立的 Dify 应用。需要单独测试和复用时，再把专项能力拆为子工作流或工具。
