@@ -8,6 +8,7 @@ data/tasks/
 data/reports/
 data/reviews/
 data/contracts/
+data/project_indexes/
 data/server.*.log
 data/*.sqlite*
 .venv/

@@ -539,6 +539,8 @@ class SupervisorAgent:
                 "task_id": state["task"].task_id,
                 "instruction": "请确认高风险或低置信度问题，可选择正确、误判或需修改。",
                 "issues": review_issues,
+                "parsed_documents": [document.model_dump(mode="json") for document in state["parsed_docs"]],
+                "agent_results": [result.model_dump(mode="json") for result in state["agent_results"]],
             }
         )
         review_items = {
