@@ -490,6 +490,8 @@ def _task_deliverables(task: TaskRecord) -> dict:
     anomaly = by_agent("异常分析智能体")
     return {
         "task_id": task.task_id,
+        "project_id": task.project_id,
+        "project_name": task.project_name,
         "status": task.status,
         "document_parse_package": document_package,
         "compliance_issue_list": {
