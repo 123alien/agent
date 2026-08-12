@@ -134,7 +134,13 @@ class QualityReviewerAgent:
             source_text = raw_texts.get(issue.source_file, "")
             if not source_text:
                 source_text = "\n".join(raw_texts.values())
-            missing = [item for item in issue.evidence if item and item not in source_text]
+            derived_quotes = {
+                ref.quote for ref in issue.evidence_refs if ref.source_type == "derived"
+            }
+            missing = [
+                item for item in issue.evidence
+                if item and item not in source_text and item not in derived_quotes
+            ]
             if missing:
                 return f"证据无法在原文中定位: {missing[0]}"
         return ""

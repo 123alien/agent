@@ -12,7 +12,12 @@ def main() -> int:
     task = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     expected = json.loads(Path("test_data/enterprise_demo/expected_findings.json").read_text(encoding="utf-8"))
     issues = (task.get("result") or {}).get("issues") or task.get("review_request", {}).get("issues", [])
-    corpus = json.dumps(issues, ensure_ascii=False)
+    agent_results = (task.get("result") or {}).get("agent_results") or task.get("review_request", {}).get("agent_results", [])
+    parsed_documents = (task.get("result") or {}).get("parsed_documents") or task.get("review_request", {}).get("parsed_documents", [])
+    corpus = json.dumps(
+        {"issues": issues, "agent_results": agent_results, "parsed_documents": parsed_documents},
+        ensure_ascii=False,
+    )
     checks = []
     for finding in expected["expected_findings"]:
         signals = [str(value) for value in finding.get("signals", [])]

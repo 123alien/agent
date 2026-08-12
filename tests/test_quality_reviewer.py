@@ -1,10 +1,24 @@
 import unittest
 
 from app.agents.quality_reviewer import QualityReviewerAgent
-from app.schemas.task import Issue
+from app.schemas.task import EvidenceRef, Issue
 
 
 class QualityReviewerIssueIdTests(unittest.TestCase):
+    def test_derived_detector_evidence_is_valid(self):
+        issue = Issue(
+            agent="文档解析智能体", risk_level="中", source_file="D.pdf",
+            source_location="第 8 页", issue_type="印章视觉核验待复核",
+            description="第8页未确认印章",
+            evidence=["投标人（盖章）：", "状态=not_detected；检测器=red-seal-rule-v1"],
+            evidence_refs=[
+                EvidenceRef(document_id="F1", quote="投标人（盖章）：", page=8),
+                EvidenceRef(document_id="F1", quote="状态=not_detected；检测器=red-seal-rule-v1", page=8, source_type="derived"),
+            ], requires_human_review=True, detection_status="not_detected",
+        )
+        result = QualityReviewerAgent().review([issue], {"D.pdf": "投标人（盖章）："})
+        self.assertEqual(len(result.valid_issues), 1)
+
     def test_same_evidence_on_different_pages_gets_unique_ids(self):
         issues = [
             Issue(agent="文档解析智能体", risk_level="中", source_file="A.pdf", source_location="第 8 页", issue_type="印章视觉核验待复核", description="第8页待复核", evidence=["投标人（盖章）："], requires_human_review=True),
