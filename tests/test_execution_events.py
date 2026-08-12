@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.api.tasks import _progress_callback
+from app.api.tasks import _progress_callback, build_task
 from app.schemas.task import TaskRecord
 
 
@@ -34,6 +34,21 @@ class ExecutionEventTests(unittest.TestCase):
         self.assertEqual(task.execution_context["node"], "document_parser")
         self.assertIn("timestamp", task.execution_context)
         save.assert_called_once_with(task)
+
+    def test_new_task_freezes_execution_versions(self) -> None:
+        task = build_task("T1", "P1", "版本测试", "full", [])
+        self.assertIn("model", task.execution_metadata)
+        self.assertIn("ruleset_version", task.execution_metadata)
+        self.assertEqual(
+            set(task.execution_metadata["workflows"]),
+            {"compliance", "data_validation", "anomaly_analysis", "report_generation"},
+        )
+
+    def test_execution_metadata_is_serializable_in_task_contract(self) -> None:
+        task = build_task("T2", "P2", "序列化测试", "auto", [])
+        restored = TaskRecord.model_validate_json(task.model_dump_json())
+        self.assertEqual(restored.execution_metadata, task.execution_metadata)
+        self.assertEqual(restored.review_audit, [])
 
 
 if __name__ == "__main__":

@@ -34,3 +34,9 @@
 ```
 
 生成脚本可重复执行，会覆盖同名测试产物，不读取 `.env`，也不会调用外部模型。
+
+任务完成后可执行标准化评测，输出预期发现召回率、证据覆盖率和人工复核覆盖率：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_enterprise_demo.py data\tasks\Txxxx.json
+```

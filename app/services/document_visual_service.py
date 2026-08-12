@@ -140,7 +140,7 @@ def _detect_with_yolo(image, page_number: int, model_path: str) -> list[VisualDe
 
 def analyze_document_visuals(
     path: str | Path,
-    max_pages: int = 100,
+    max_pages: int = 0,
     model_path: str = "",
 ) -> VisualAnalysisResult:
     file_path = Path(path)
@@ -150,7 +150,7 @@ def analyze_document_visuals(
     result = VisualAnalysisResult()
     try:
         for page_number, image in _render_pdf(file_path):
-            if page_number > max_pages:
+            if max_pages > 0 and page_number > max_pages:
                 result.warnings.append(f"文档超过 {max_pages} 页，仅检测前 {max_pages} 页")
                 break
             result.analyzed_pages += 1

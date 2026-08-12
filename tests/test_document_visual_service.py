@@ -32,6 +32,18 @@ class DocumentVisualServiceTests(unittest.TestCase):
         self.assertEqual(result.analyzed_pages, 0)
         self.assertTrue(result.warnings)
 
+    def test_zero_page_limit_means_analyze_all_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "two-pages.pdf"
+            first = Image.new("RGB", (120, 160), "white")
+            second = Image.new("RGB", (120, 160), "white")
+            first.save(path, "PDF", save_all=True, append_images=[second])
+            first.close()
+            second.close()
+            result = analyze_document_visuals(path, max_pages=0)
+            self.assertEqual(result.analyzed_pages, 2)
+            self.assertFalse(any("仅检测前" in warning for warning in result.warnings))
+
 
 if __name__ == "__main__":
     unittest.main()

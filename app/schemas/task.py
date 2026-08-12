@@ -302,6 +302,8 @@ class TaskRecord(BaseModel):
     review_progress: dict = Field(default_factory=dict)
     execution_context: dict = Field(default_factory=dict)
     execution_events: list[dict] = Field(default_factory=list)
+    execution_metadata: dict = Field(default_factory=dict)
+    review_audit: list[dict] = Field(default_factory=list)
     callback_url: str = ""
     system_record: dict = Field(default_factory=dict)
     relationship_data: dict = Field(default_factory=dict)

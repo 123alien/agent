@@ -49,7 +49,9 @@ class Settings:
     )
     rag_cache_ttl_seconds: int = int(os.getenv("RAG_CACHE_TTL_SECONDS", "604800"))
     visual_analysis_enabled: bool = os.getenv("VISUAL_ANALYSIS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-    visual_analysis_max_pages: int = int(os.getenv("VISUAL_ANALYSIS_MAX_PAGES", "100"))
+    # 0 means no page truncation. Production deployments may set a positive
+    # limit when GPU capacity is constrained.
+    visual_analysis_max_pages: int = max(0, int(os.getenv("VISUAL_ANALYSIS_MAX_PAGES", "0")))
     visual_review_threshold: float = float(os.getenv("VISUAL_REVIEW_THRESHOLD", "0.80"))
     visual_detector_model_path: str = os.getenv("VISUAL_DETECTOR_MODEL_PATH", "")
     compliance_workflow_version: str = os.getenv(

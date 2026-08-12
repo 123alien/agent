@@ -76,6 +76,12 @@ def get_capabilities() -> dict:
             "header": "X-API-Key",
         },
         "human_review": True,
+        "execution_observability": {
+            "live_context": "execution_context",
+            "timeline": "execution_events",
+            "version_snapshot": "execution_metadata",
+            "review_audit": "review_audit",
+        },
         "callback": {
             "supported": True,
             "signed": bool(settings.callback_secret),
@@ -208,6 +214,18 @@ def build_task(
         relationship_data=relationship_data or {},
         output_type=output_type,
         template_type=template_type,
+        execution_metadata={
+            "api_version": API_CONTRACT_VERSION,
+            "agent_contract_version": AGENT_CONTRACT_VERSION,
+            "model": settings.llm_model,
+            "ruleset_version": settings.ruleset_version,
+            "workflows": {
+                "compliance": settings.compliance_workflow_version,
+                "data_validation": settings.data_validator_workflow_version,
+                "anomaly_analysis": settings.anomaly_analyzer_workflow_version,
+                "report_generation": settings.report_generator_workflow_version,
+            },
+        },
         callback_status="pending" if callback_url else "not_configured",
         created_at=timestamp,
         updated_at=timestamp,
@@ -232,6 +250,18 @@ def run_task(task_id: str) -> None:
     except Exception as exc:
         task.status = "failed"
         task.error = str(exc)
+        _progress_callback(task)(
+            {
+                "agent": task.execution_context.get("agent", "LangGraph总控智能体"),
+                "node": task.execution_context.get("node", "supervisor"),
+                "status": "failed",
+                "goal": task.execution_context.get("goal", "执行智能核验任务"),
+                "tools": task.execution_context.get("tools", []),
+                "finding": f"执行失败：{exc}",
+                "decision": "任务已停止，请根据错误信息修复后重新运行。",
+                "review_reason": "",
+            }
+        )
         task_store.save(task)
     if task.status != "waiting_review":
         send_callback(task)
@@ -256,6 +286,18 @@ def resume_task(task_id: str, review: dict) -> None:
     except Exception as exc:
         task.status = "failed"
         task.error = str(exc)
+        _progress_callback(task)(
+            {
+                "agent": task.execution_context.get("agent", "LangGraph总控智能体"),
+                "node": task.execution_context.get("node", "supervisor"),
+                "status": "failed",
+                "goal": task.execution_context.get("goal", "恢复人工复核后的任务"),
+                "tools": task.execution_context.get("tools", []),
+                "finding": f"恢复执行失败：{exc}",
+                "decision": "任务已停止，请检查复核数据和执行日志。",
+                "review_reason": "",
+            }
+        )
         task_store.save(task)
     if task.status != "waiting_review":
         send_callback(task)
@@ -497,6 +539,16 @@ def submit_review(
         )
 
     merged["submit"] = True
+    task.review_audit.append(
+        {
+            "timestamp": now_iso(),
+            "reviewer": merged.get("reviewer", ""),
+            "action": "submit",
+            "comment": merged.get("comment", ""),
+            "items": merged.get("items", []),
+            "progress": progress,
+        }
+    )
     path = task_store.save_review(task_id, merged, status="submitted")
     task.status = "running"
     task.review_request = {}
