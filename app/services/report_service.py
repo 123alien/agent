@@ -12,6 +12,58 @@ from app.core.config import ensure_data_dirs, settings
 from app.schemas.task import TaskRecord, TaskResult
 
 
+REPORT_AGENT_ORDER = (
+    "文档解析智能体",
+    "合规审查智能体",
+    "数据核验智能体",
+    "异常分析智能体",
+    "结果复核智能体",
+    "报告生成智能体",
+)
+
+
+def issue_is_confirmed(issue) -> bool:
+    return issue.final_status == "confirmed_issue"
+
+
+def issue_needs_review(issue) -> bool:
+    return issue.final_status == "human_review"
+
+
+def public_warning(warning: str) -> str:
+    """Hide implementation/vendor errors from formal deliverables."""
+    if "Dify" in warning or "Workflow" in warning or "工作流" in warning:
+        return "语义增强未完成，已采用确定性解析结果继续核验。"
+    return warning
+
+
+def report_suggestion(issue, report_status: str) -> str:
+    suggestion = issue.suggestion or "待补充处置建议"
+    if report_status != "正式核验版" or issue_needs_review(issue):
+        return suggestion
+    if issue.detection_status == "not_detected":
+        return "人工复核已完成；请依据复核结论补正缺失的形式要件并留痕。"
+    if issue.detection_status == "mismatch":
+        return "人工复核已完成；请核实主体信息，修正不一致内容并留痕。"
+    if issue.detection_status in {"not_checked", "low_confidence", "uncertain"}:
+        return "人工复核已完成；请依据复核结论完成相应补正、整改并留痕。"
+    return suggestion.replace("建议人工复核", "建议依据已完成的人工复核结论").replace(
+        "请人工复核", "请依据已完成的人工复核结论"
+    ).replace("请人工查看", "请依据已完成的人工复核记录核对")
+
+
+def confidence_rows(issue) -> tuple[tuple[str, str], ...]:
+    detection = f"{issue.confidence:.0%}" if issue.detection_status else "不适用"
+    evidence = "完整" if issue.evidence or issue.evidence_refs else "不足"
+    conclusion = "待人工复核" if issue_needs_review(issue) else "人工已确认/规则已确认"
+    return (("检测置信度", detection), ("证据完整度", evidence), ("结论状态", conclusion))
+
+
+def report_agent_names(result: TaskResult) -> list[str]:
+    present = {item.agent for item in result.agent_results}
+    return [name for name in REPORT_AGENT_ORDER if name in present]
+
+
 def _report_data(result: TaskResult) -> dict:
     reports = [
         item.data
@@ -60,12 +112,8 @@ def create_markdown_report(task: TaskRecord, result: TaskResult) -> Path:
             ]
         )
 
-    confirmed_issues = [
-        issue for issue in result.issues if issue.assessment == "明确问题"
-    ]
-    pending_issues = [
-        issue for issue in result.issues if issue.assessment == "待人工判断"
-    ]
+    confirmed_issues = [issue for issue in result.issues if issue_is_confirmed(issue)]
+    pending_issues = [issue for issue in result.issues if issue_needs_review(issue)]
     lines.extend(
         [
             "## 二、审查事项清单",
@@ -91,13 +139,15 @@ def create_markdown_report(task: TaskRecord, result: TaskResult) -> Path:
                     f"- 问题编号: {issue.issue_id or '未生成'}",
                     f"- 来源智能体: {issue.agent}",
                     f"- 自动判断: {issue.assessment}",
-                    f"- 置信度: {issue.confidence:.0%}",
+                    f"- 检测置信度: {issue.confidence:.0%}" if issue.detection_status else "- 检测置信度: 不适用",
+                    f"- 证据完整度: {'完整' if issue.evidence or issue.evidence_refs else '不足'}",
+                    f"- 结论状态: {'待人工复核' if issue_needs_review(issue) else '人工已确认/规则已确认'}",
                     f"- 风险等级: {issue.risk_level}",
                     f"- 来源文件: {issue.source_file or '未定位'}",
                     f"- 位置: {issue.source_location or '未定位'}",
                     f"- 问题描述: {issue.description}",
                     f"- 依据: {issue.basis or '待人工补充'}",
-                    f"- 建议: {issue.suggestion or '待人工确认'}",
+                    f"- 建议: {report_suggestion(issue, _report_data(result).get('report_status', '待复核版'))}",
                     "",
                 ]
             )
@@ -128,8 +178,8 @@ def create_markdown_report(task: TaskRecord, result: TaskResult) -> Path:
             lines.append("")
 
     lines.extend(["## 三、专项智能体结论", ""])
-    for agent_result in result.agent_results:
-        lines.extend([f"### {agent_result.agent}", "", final_agent_conclusion(result, agent_result.agent), ""])
+    for agent_name in report_agent_names(result):
+        lines.extend([f"### {agent_name}", "", final_agent_conclusion(result, agent_name), ""])
 
     human_review = next(
         (
@@ -153,9 +203,8 @@ def create_markdown_report(task: TaskRecord, result: TaskResult) -> Path:
     )
 
     lines.extend(["## 五、整改建议汇总", ""])
-    suggestions = list(
-        dict.fromkeys(issue.suggestion for issue in result.issues if issue.suggestion)
-    )
+    report_status = str(_report_data(result).get("report_status", "待复核版"))
+    suggestions = list(dict.fromkeys(report_suggestion(issue, report_status) for issue in result.issues))
     if suggestions:
         for index, suggestion in enumerate(suggestions, start=1):
             lines.append(f"{index}. {suggestion}")
@@ -348,8 +397,8 @@ def final_agent_conclusion(result: TaskResult, agent_name: str, report_issues: l
     """Build report prose from the final reviewed issue list, never from stale raw-agent counts."""
     issues = list(result.issues if report_issues is None else report_issues)
     agent_issues = [issue for issue in issues if issue.agent == agent_name]
-    confirmed = sum(1 for issue in agent_issues if not issue.requires_human_review)
-    pending = sum(1 for issue in agent_issues if issue.requires_human_review)
+    confirmed = sum(1 for issue in agent_issues if issue_is_confirmed(issue))
+    pending = sum(1 for issue in agent_issues if issue_needs_review(issue))
     documents = result.parsed_documents
     file_count = len(documents)
     page_count = sum(int(getattr(item, "page_count", 0) or 0) for item in documents)
@@ -376,7 +425,7 @@ def final_agent_conclusion(result: TaskResult, agent_name: str, report_issues: l
         scope = "当前材料" if file_count != 1 else "基于当前单份材料"
         return f"{scope}暂未发现可形成有效证据链的异常关联线索。"
     if agent_name == "结果复核智能体":
-        return f"已统一复核各专项智能体发现，最终确认明确问题{sum(not i.requires_human_review for i in issues)}项、待人工复核事项{sum(i.requires_human_review for i in issues)}项。"
+        return f"已统一复核各专项智能体发现，最终确认明确问题{sum(issue_is_confirmed(i) for i in issues)}项、待人工复核事项{sum(issue_needs_review(i) for i in issues)}项。"
     raw = next((item.summary for item in result.agent_results if item.agent == agent_name), "")
     return raw or "已完成本环节处理。"
 
@@ -384,8 +433,8 @@ def final_agent_conclusion(result: TaskResult, agent_name: str, report_issues: l
 def final_report_conclusion(result: TaskResult, report_issues: list | None = None) -> str:
     """One canonical conclusion used by every report section and export format."""
     issues = list(result.issues if report_issues is None else report_issues)
-    confirmed = sum(1 for issue in issues if not issue.requires_human_review)
-    pending = sum(1 for issue in issues if issue.requires_human_review)
+    confirmed = sum(1 for issue in issues if issue_is_confirmed(issue))
+    pending = sum(1 for issue in issues if issue_needs_review(issue))
     if not issues:
         return "本次自动核验暂未发现证据充分的明确问题，亦无待人工复核事项。"
     if confirmed == 0:
@@ -428,7 +477,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
         level: sum(1 for issue in report_issues if issue.risk_level == level)
         for level in ("高", "中", "低")
     }
-    pending_count = sum(1 for issue in report_issues if issue.requires_human_review)
+    pending_count = sum(1 for issue in report_issues if issue_needs_review(issue))
 
     # Editorial cover: restrained formal report packaging.
     spacer = document.add_paragraph()
@@ -491,7 +540,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
         for index, issue in enumerate(report_issues, start=1):
             document.add_heading(f"{index}. {issue.issue_type}（{issue.risk_level}）", level=2)
             document.add_paragraph(issue.description)
-            document.add_paragraph(f"建议：{issue.suggestion or '待人工确认'}")
+            document.add_paragraph(f"建议：{report_suggestion(issue, report_status)}")
         if not report_issues:
             document.add_paragraph("未发现需要向管理层报告的明确或潜在问题。")
         document.add_heading("三、管理决策建议", level=1)
@@ -522,9 +571,9 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
                 index,
                 issue.issue_id or "未生成",
                 issue.risk_level,
-                issue.suggestion or "待补充整改措施",
+                report_suggestion(issue, report_status),
                 priority,
-                "待复核" if issue.requires_human_review else "待整改",
+                "待复核" if issue_needs_review(issue) else "待整改",
             )
             cells = rectification.add_row().cells
             for cell, value in zip(cells, values, strict=True):
@@ -576,7 +625,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
 
     document.add_heading("一、执行摘要", level=1)
     document.add_paragraph(final_report_conclusion(result, report_issues))
-    confirmed_count = sum(1 for issue in report_issues if not issue.requires_human_review)
+    confirmed_count = sum(1 for issue in report_issues if issue_is_confirmed(issue))
     overview = document.add_table(rows=2, cols=6)
     overview.style = "Table Grid"
     _set_table_geometry(overview, [1560, 1560, 1560, 1560, 1560, 1560])
@@ -674,7 +723,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
                     parsed.parse_status,
                     parsed.page_count,
                     len(parsed.tables),
-                    "；".join(parsed.warnings[:3]) or "无",
+                    "；".join(dict.fromkeys(public_warning(item) for item in parsed.warnings[:3])) or "无",
                 ),
                 strict=True,
             ):
@@ -715,7 +764,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
             "已启用" if parsed.ocr_applied else "未启用",
             seal_state,
             parsed.parse_status,
-            "；".join(parsed.warnings[:5]) or "无",
+            "；".join(dict.fromkeys(public_warning(item) for item in parsed.warnings[:5])) or "无",
         )
         cells = quality.add_row().cells
         for cell, value in zip(cells, values, strict=True):
@@ -735,7 +784,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
                 issue.description,
                 issue.risk_level,
                 issue.agent,
-                "待复核" if issue.requires_human_review else "已确认/自动核验",
+                "待复核" if issue_needs_review(issue) else "明确问题",
             )
             cells = matrix.add_row().cells
             for cell, value in zip(cells, values, strict=True):
@@ -760,18 +809,18 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
             ("问题描述", issue.description),
             ("原文证据", evidence),
             ("判断依据", issue.basis or "待人工补充"),
-            ("修改建议", issue.suggestion or "待人工确认"),
-            ("最终状态", "待人工复核" if issue.requires_human_review else "明确问题"),
+            ("修改建议", report_suggestion(issue, report_status)),
+            ("最终状态", "待人工复核" if issue_needs_review(issue) else "明确问题"),
             ("检测状态", issue.detection_status or "不适用"),
-            ("置信度", f"{issue.confidence:.0%}"),
-            ("人工复核", "需要" if issue.requires_human_review else "已完成或无需复核"),
+            *confidence_rows(issue),
+            ("人工复核", "需要" if issue_needs_review(issue) else "已完成或无需复核"),
         ]
         _add_label_value_table(document, rows)
 
     document.add_heading("七、专项智能体结论", level=1)
-    for agent_result in result.agent_results:
-        document.add_heading(agent_result.agent, level=2)
-        document.add_paragraph(final_agent_conclusion(result, agent_result.agent, report_issues))
+    for agent_name in report_agent_names(result):
+        document.add_heading(agent_name, level=2)
+        document.add_paragraph(final_agent_conclusion(result, agent_name, report_issues))
 
     document.add_heading("八、人工复核与整改闭环", level=1)
     human_review = next(
@@ -789,9 +838,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
             document.add_paragraph(f"复核人：{reviewer}")
     else:
         document.add_paragraph("本任务尚未形成已提交的人工复核结论。")
-    suggestions = list(
-        dict.fromkeys(issue.suggestion for issue in report_issues if issue.suggestion)
-    )
+    suggestions = list(dict.fromkeys(report_suggestion(issue, report_status) for issue in report_issues))
     if suggestions:
         rectification = document.add_table(rows=1, cols=5)
         rectification.style = "Table Grid"
@@ -802,9 +849,9 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
             values = (
                 index,
                 issue.issue_id or "未生成",
-                issue.suggestion or "待补充",
+                report_suggestion(issue, report_status),
                 priority,
-                "待人工复核" if issue.requires_human_review else "纳入整改跟踪",
+                "待人工复核" if issue_needs_review(issue) else "纳入整改跟踪",
             )
             cells = rectification.add_row().cells
             for cell, value in zip(cells, values, strict=True):

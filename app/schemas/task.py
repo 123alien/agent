@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 API_CONTRACT_VERSION = "1.0.0"
@@ -73,12 +73,36 @@ class Issue(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     requires_human_review: bool = False
-    assessment: Literal["明确问题", "待人工判断"] = "明确问题"
-    final_status: Literal["confirmed", "human_review"] = "confirmed"
+    assessment: Literal["明确问题", "待人工判断", "未发现问题"] = "明确问题"
+    final_status: Literal["confirmed_issue", "human_review", "passed"] = "confirmed_issue"
     detection_status: Literal[
         "", "detected", "not_detected", "not_checked", "low_confidence", "mismatch", "uncertain"
     ] = ""
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+    @field_validator("final_status", mode="before")
+    @classmethod
+    def migrate_legacy_final_status(cls, value: object) -> object:
+        """Keep persisted tasks from the legacy two-state contract readable."""
+        if value == "confirmed":
+            return "confirmed_issue"
+        return value
+
+    @model_validator(mode="after")
+    def enforce_review_state(self) -> "Issue":
+        review_detections = {
+            "not_detected", "not_checked", "low_confidence", "mismatch", "uncertain"
+        }
+        if self.requires_human_review or self.detection_status in review_detections:
+            self.requires_human_review = True
+            self.assessment = "待人工判断"
+            self.final_status = "human_review"
+        elif self.final_status == "passed":
+            self.assessment = "未发现问题"
+        else:
+            self.assessment = "明确问题"
+            self.final_status = "confirmed_issue"
+        return self
 
 
 class DocumentSection(BaseModel):

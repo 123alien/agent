@@ -10,6 +10,8 @@ from app.agents.report_generator import ReportGeneratorAgent
 from app.schemas.task import AgentResult, Issue, ParsedDocument, TaskRecord, TaskResult
 from app.services.report_service import (
     create_docx_report,
+    public_warning,
+    report_suggestion,
     report_display_title,
     select_report_issues,
 )
@@ -17,6 +19,21 @@ from app.services.pdf_service import create_report_pdf
 
 
 class ReportGeneratorTests(unittest.TestCase):
+    def test_public_report_hides_vendor_error_and_formalizes_review_wording(self) -> None:
+        self.assertEqual(
+            public_warning("Dify 文档语义增强失败: timeout"),
+            "语义增强未完成，已采用确定性解析结果继续核验。",
+        )
+        issue = Issue(
+            agent="文档解析智能体", risk_level="低", issue_type="签名核验",
+            description="人工确认未签字", suggestion="请人工查看原始文件第15页。",
+            detection_status="not_checked", requires_human_review=False,
+        )
+        issue.final_status = "confirmed_issue"
+        issue.assessment = "明确问题"
+        issue.requires_human_review = False
+        self.assertNotIn("请人工查看", report_suggestion(issue, "正式核验版"))
+
     def test_report_type_scopes_issues_and_template_changes_title(self) -> None:
         result = TaskResult(
             summary="测试",

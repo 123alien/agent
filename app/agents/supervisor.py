@@ -423,7 +423,7 @@ class SupervisorAgent:
             if not item or item.get("decision") == "正确":
                 if item and item.get("decision") == "正确":
                     issue.assessment = "明确问题"
-                    issue.final_status = "confirmed"
+                    issue.final_status = "confirmed_issue"
                     issue.confidence = 1.0
                     issue.requires_human_review = False
                 reviewed_issues.append(issue)
@@ -432,6 +432,7 @@ class SupervisorAgent:
                 normal_clauses.append(
                     {
                         "issue_id": issue.issue_id,
+                        "final_status": "passed",
                         "evidence": issue.evidence,
                         "description": issue.description,
                         "review_comment": item.get("comment", ""),
@@ -443,7 +444,7 @@ class SupervisorAgent:
                 if corrected_text:
                     issue.description = corrected_text
                 issue.assessment = "明确问题"
-                issue.final_status = "confirmed"
+                issue.final_status = "confirmed_issue"
                 issue.confidence = 1.0
                 issue.requires_human_review = False
                 reviewed_issues.append(issue)
@@ -473,6 +474,7 @@ class SupervisorAgent:
                     suggestion="请结合原文证据进一步核实并完善审查结论。",
                     requires_human_review=False,
                     assessment="明确问题",
+                    final_status="confirmed_issue",
                     confidence=1.0,
                 )
             )

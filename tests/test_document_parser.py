@@ -9,6 +9,7 @@ from openpyxl import Workbook
 
 from app.agents.document_parser import (
     DocumentParserAgent,
+    _clean_field_value,
     _expected_visual_marks,
     _extract_fields,
     _infer_subtype_from_content,
@@ -37,6 +38,21 @@ SAMPLE_TEXT = """项目名称：某市信息化平台建设项目
 二、评审办法
 技术方案评分40分。
 """
+
+
+class FieldCleanupTests(unittest.TestCase):
+    def test_repeated_label_and_inline_next_field_are_removed(self) -> None:
+        self.assertEqual(
+            _clean_field_value("project_name", "项目名称XX市信息化平台升级建设项目"),
+            "XX市信息化平台升级建设项目",
+        )
+        self.assertEqual(
+            _clean_field_value(
+                "tenderer",
+                "XX市政务服务管理中心。采购代理机构：XX市公共资源交易中心",
+            ),
+            "XX市政务服务管理中心",
+        )
 
 
 class FileParserTests(unittest.TestCase):

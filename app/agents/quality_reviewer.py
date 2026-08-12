@@ -26,7 +26,7 @@ class QualityReviewerAgent:
                 issue.final_status = "human_review"
             else:
                 issue.assessment = "明确问题"
-                issue.final_status = "confirmed"
+                issue.final_status = "confirmed_issue"
             reason = self._invalid_reason(issue, raw_texts)
             fingerprint = (
                 issue.source_file,

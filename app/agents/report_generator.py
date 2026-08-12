@@ -27,12 +27,12 @@ class ReportGeneratorAgent:
         high = sum(1 for issue in issues if issue.risk_level == "高")
         medium = sum(1 for issue in issues if issue.risk_level == "中")
         low = sum(1 for issue in issues if issue.risk_level == "低")
-        confirmed = sum(1 for issue in issues if not issue.requires_human_review)
-        pending = sum(1 for issue in issues if issue.requires_human_review)
+        confirmed = sum(1 for issue in issues if issue.final_status == "confirmed_issue")
+        pending = sum(1 for issue in issues if issue.final_status == "human_review")
         missing_evidence = sum(
             1 for issue in issues if not issue.evidence and not issue.evidence_refs
         )
-        review_required = sum(1 for issue in issues if issue.requires_human_review)
+        review_required = pending
         failed_documents = sum(
             1 for document in parsed_docs if document.parse_status == "failed"
         )

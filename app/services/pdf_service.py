@@ -21,7 +21,11 @@ from app.core.config import ensure_data_dirs, settings
 from app.schemas.contract import ContractGenerationRequest, ContractValidationItem
 from app.schemas.task import TaskRecord, TaskResult
 from app.services.contract_service import amount_to_chinese
-from app.services.report_service import final_agent_conclusion, final_report_conclusion, report_display_title, select_report_issues
+from app.services.report_service import (
+    confidence_rows, final_agent_conclusion, final_report_conclusion,
+    issue_is_confirmed, issue_needs_review, public_warning, report_agent_names,
+    report_display_title, report_suggestion, select_report_issues,
+)
 
 
 FONT_NAME = "STSong-Light"
@@ -131,8 +135,8 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         level: sum(1 for issue in report_issues if issue.risk_level == level)
         for level in ("高", "中", "低")
     }
-    pending = sum(1 for issue in report_issues if issue.requires_human_review)
-    confirmed = sum(1 for issue in report_issues if not issue.requires_human_review)
+    pending = sum(1 for issue in report_issues if issue_needs_review(issue))
+    confirmed = sum(1 for issue in report_issues if issue_is_confirmed(issue))
     story = [
         Spacer(1, 34 * mm),
         _p("招投标全过程智能核验", styles["h2"]),
@@ -242,7 +246,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
                 _p(parsed.document_subtype or parsed.file_type, styles["small"]),
                 _p(parsed.page_count, styles["small"]),
                 _p(parsed.parse_status, styles["small"]),
-                _p("；".join(parsed.warnings[:3]) or "无", styles["small"]),
+                _p("；".join(dict.fromkeys(public_warning(item) for item in parsed.warnings[:3])) or "无", styles["small"]),
             ]
         )
     documents_table = Table(document_rows, colWidths=[10*mm, 50*mm, 27*mm, 14*mm, 19*mm, 40*mm], repeatRows=1)
@@ -267,7 +271,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
             f"表格：{len(parsed.tables)}；OCR：{'已启用' if parsed.ocr_applied else '未启用'}。"
         )
         story.append(_p(quality_text, styles["body"]))
-        for warning in parsed.warnings[:10]:
+        for warning in dict.fromkeys(public_warning(item) for item in parsed.warnings[:10]):
             story.append(_p(f"质量提示：{warning}", styles["small"]))
     story.append(_p("五、风险与问题总览", styles["h1"]))
     if report_issues:
@@ -277,7 +281,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
                 _p(index, styles["small"]), _p(issue.issue_id or "未生成", styles["small"]),
                 _p(issue.issue_type, styles["small"]), _p(issue.risk_level, styles["small"]),
                 _p(issue.description, styles["small"]),
-                _p("待复核" if issue.requires_human_review else "已确认", styles["small"]),
+                _p("待复核" if issue_needs_review(issue) else "明确问题", styles["small"]),
             ])
         issue_table = Table(issue_rows, colWidths=[10*mm, 25*mm, 27*mm, 14*mm, 65*mm, 19*mm], repeatRows=1)
         issue_table.setStyle(TableStyle([
@@ -296,24 +300,24 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         evidence = "；".join(issue.evidence) or "；".join(ref.quote for ref in issue.evidence_refs) or "未提供"
         for label, value in (
             ("问题编号", issue.issue_id or f"R-{index:03d}"),
-            ("最终状态", "待人工复核" if issue.requires_human_review else "明确问题"),
+            ("最终状态", "待人工复核" if issue_needs_review(issue) else "明确问题"),
             ("检测状态", issue.detection_status or "不适用"),
             ("问题描述", issue.description),
             ("原文证据", evidence),
             ("判断依据", issue.basis or "待人工补充"),
-            ("修改建议", issue.suggestion or "待人工确认"),
+            ("修改建议", report_suggestion(issue, status)),
             ("来源智能体", issue.agent),
             ("来源位置", issue.source_location or "未定位"),
-            ("模型置信度", f"{issue.confidence:.0%}"),
-            ("人工复核", "需要" if issue.requires_human_review else "不需要"),
+            *confidence_rows(issue),
+            ("人工复核", "需要" if issue_needs_review(issue) else "已完成或无需复核"),
         ):
             story.append(_label_value_p(label, value, styles["body"]))
     story.append(_p("七、专项智能体结论", styles["h1"]))
-    for agent_result in result.agent_results:
+    for agent_name in report_agent_names(result):
         story.extend(
             [
-                _p(agent_result.agent, styles["h2"]),
-                _p(final_agent_conclusion(result, agent_result.agent, report_issues), styles["body"]),
+                _p(agent_name, styles["h2"]),
+                _p(final_agent_conclusion(result, agent_name, report_issues), styles["body"]),
             ]
         )
     story.append(_p("八、人工复核与整改闭环", styles["h1"]))
@@ -324,7 +328,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
     ))
     for index, issue in enumerate(report_issues, start=1):
         priority = "立即" if issue.risk_level == "高" else "优先" if issue.risk_level == "中" else "常规"
-        story.append(_p(f"{index}. [{priority}] {issue.suggestion or '待补充整改措施'}", styles["body"]))
+        story.append(_p(f"{index}. [{priority}] {report_suggestion(issue, status)}", styles["body"]))
     story.extend([
         _p("九、综合结论", styles["h1"]),
         _p(final_report_conclusion(result, report_issues), styles["body"]),

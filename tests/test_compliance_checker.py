@@ -275,7 +275,8 @@ class ComplianceCheckerTests(unittest.TestCase):
         self.assertEqual(result.issues[0].risk_level, "高")
         self.assertTrue(result.issues[0].requires_human_review)
         self.assertEqual(result.issues[0].evidence, [text])
-        self.assertEqual(result.issues[0].assessment, "明确问题")
+        self.assertEqual(result.issues[0].assessment, "待人工判断")
+        self.assertEqual(result.issues[0].final_status, "human_review")
 
     def test_missing_high_attention_candidate_triggers_one_coverage_retry(self) -> None:
         geographic = "1. 投标人注册地址位于本市的得10分，外省企业不得分。"

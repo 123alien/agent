@@ -91,6 +91,35 @@ FIELD_PATTERNS: dict[str, tuple[str, list[re.Pattern[str]]]] = {
     ),
 }
 
+FIELD_LABELS = (
+    "项目名称", "采购项目名称", "招标项目名称", "工程名称", "项目编号",
+    "采购人", "招标人", "采购单位", "招标单位", "采购代理机构", "招标代理机构",
+    "项目预算", "预算金额", "最高投标限价", "最高控制价", "截止时间",
+)
+
+
+def _clean_field_value(field_name: str, value: object) -> str:
+    """Remove repeated labels and stop a value before the next inline field."""
+    cleaned = re.sub(r"[ \t]+", " ", str(value or "")).strip()
+    own_labels = {
+        "project_name": ("项目名称", "采购项目名称", "招标项目名称", "工程名称"),
+        "tenderer": ("采购人", "招标人", "采购单位", "招标单位"),
+        "procurement_agency": ("采购代理机构", "招标代理机构"),
+        "budget": ("项目预算", "预算金额", "预算"),
+        "price_limit": ("最高投标限价", "最高控制价"),
+        "deadline": ("截止时间", "投标截止时间", "响应文件提交截止时间"),
+    }.get(field_name, ())
+    for label in sorted(own_labels, key=len, reverse=True):
+        cleaned = re.sub(rf"^(?:{re.escape(label)})\s*[:：]?\s*", "", cleaned)
+    other_labels = [label for label in FIELD_LABELS if label not in own_labels]
+    if other_labels:
+        cleaned = re.split(
+            rf"[。；;]?\s*(?=(?:{'|'.join(map(re.escape, other_labels))})\s*[:：])",
+            cleaned,
+            maxsplit=1,
+        )[0]
+    return cleaned.strip().rstrip("。；;，,")[:200]
+
 
 def _heading_level(title: str) -> int:
     if title.startswith("第") and any(mark in title[:8] for mark in "篇部分章"):
@@ -299,11 +328,12 @@ def _extract_fields(content: ParsedFileContent, fallback_name: str) -> dict[str,
             match = pattern.search(content.text)
             if not match:
                 continue
-            value = match.group(1).strip().rstrip("。；")[:200]
+            value = _clean_field_value(field_name, match.group(1))
             if _is_placeholder_value(value) or _is_definition_value(field_name, value):
                 continue
             if field_name == "project_name":
                 value, raw_text = _extend_wrapped_project_name(content.text, match, value)
+                value = _clean_field_value(field_name, value)
             else:
                 raw_text = match.group(0).strip()
             page = _page_for_offset(content, match.start())
@@ -688,6 +718,7 @@ class DocumentParserAgent:
                     ):
                         sections = semantic_sections
                     for name, semantic_field in semantic_fields.items():
+                        semantic_field.value = _clean_field_value(name, semantic_field.value)
                         current = fields.get(name)
                         if current is None or semantic_field.confidence > current.confidence:
                             fields[name] = semantic_field
