@@ -74,6 +74,11 @@ Workflow。Dify 不可用时，专项智能体会按能力回退到本地规则�
 图状态保存在 `data/langgraph_checkpoints.sqlite`；人工复核接口使用相同任务编号和
 `Command(resume=...)` 恢复执行，因此服务重启后仍可继续生成最终报告。
 
+前端控制台已接入真实 LangGraph 执行事件。总控在每个节点开始、完成、路由和
+人工中断时写入 `TaskRecord.execution_events`，同时用 `execution_context` 保存最新
+事件。页面轮询任务接口即可展示当前智能体、目标、工具、发现、决策、复核原因及
+完整时间线，不再使用固定百分比模拟智能体执行过程。
+
 ## 4. 已有接口
 
 服务默认运行在 `http://127.0.0.1:8000`，Swagger 文档地址为 `http://127.0.0.1:8000/docs`。

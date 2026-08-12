@@ -1,7 +1,8 @@
 import sqlite3
+from contextvars import ContextVar
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Literal, TypedDict
+from typing import Callable, Literal, TypedDict
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -46,6 +47,11 @@ from app.services.material_inventory import build_material_inventory
 AgentNode = Literal[
     "compliance", "data", "anomaly", "review", "human_review", "report"
 ]
+
+ProgressCallback = Callable[[dict], None]
+_progress_callback: ContextVar[ProgressCallback | None] = ContextVar(
+    "supervisor_progress_callback", default=None
+)
 
 
 @dataclass
@@ -158,34 +164,60 @@ class SupervisorAgent:
             name="tender-review-supervisor",
         )
 
-    def run(self, task: TaskRecord) -> SupervisorRun:
-        output = self.graph.invoke(
-            {
-                "task": task,
-                "parsed_docs": [],
-                "raw_texts": {},
-                "document_contexts": [],
-                "pending_agents": [],
-                "agent_results": [],
-                "issues": [],
-                "execution_trace": [],
-                "retry_counts": {},
-                "review_completed": False,
-                "human_review_completed": False,
-                "human_review": {},
-                "routing": {},
-                "result": None,
-            },
-            config=self._config(task.task_id),
-        )
-        return self._outcome(output)
+    def run(
+        self, task: TaskRecord, progress_callback: ProgressCallback | None = None
+    ) -> SupervisorRun:
+        token = _progress_callback.set(progress_callback)
+        try:
+            output = self.graph.invoke(
+                {
+                    "task": task,
+                    "parsed_docs": [],
+                    "raw_texts": {},
+                    "document_contexts": [],
+                    "pending_agents": [],
+                    "agent_results": [],
+                    "issues": [],
+                    "execution_trace": [],
+                    "retry_counts": {},
+                    "review_completed": False,
+                    "human_review_completed": False,
+                    "human_review": {},
+                    "routing": {},
+                    "result": None,
+                },
+                config=self._config(task.task_id),
+            )
+            return self._outcome(output)
+        finally:
+            _progress_callback.reset(token)
 
-    def resume(self, task_id: str, review: dict) -> SupervisorRun:
-        output = self.graph.invoke(
-            Command(resume=review),
-            config=self._config(task_id),
-        )
-        return self._outcome(output)
+    def resume(
+        self, task_id: str, review: dict,
+        progress_callback: ProgressCallback | None = None,
+    ) -> SupervisorRun:
+        token = _progress_callback.set(progress_callback)
+        try:
+            output = self.graph.invoke(
+                Command(resume=review), config=self._config(task_id)
+            )
+            return self._outcome(output)
+        finally:
+            _progress_callback.reset(token)
+
+    @staticmethod
+    def _emit(
+        *, agent: str, node: str, status: str, goal: str,
+        tools: list[str] | None = None, finding: str = "",
+        decision: str = "", review_reason: str = "",
+    ) -> None:
+        callback = _progress_callback.get()
+        if callback:
+            callback({
+                "agent": agent, "node": node, "status": status,
+                "goal": goal, "tools": tools or [], "finding": finding,
+                "decision": decision, "review_reason": review_reason,
+            })
 
     @staticmethod
     def _config(task_id: str) -> dict:
@@ -203,6 +235,11 @@ class SupervisorAgent:
 
     def _parse_documents(self, state: AgentState) -> dict:
         task = state["task"]
+        self._emit(
+            agent="文档解析智能体", node="document_parser", status="running",
+            goal="解析文件类型、正文、章节、表格、关键字段与视觉核验线索",
+            tools=["文件类型识别", "版面与表格解析", "OCR", "Dify语义增强（按配置启用）"],
+        )
         parsed_docs, document_result, raw_texts = self.document_parser.run(
             task.files,
             task.project_name,
@@ -221,6 +258,18 @@ class SupervisorAgent:
             "document_context_contract": "1.0.0",
             "document_context_count": len(document_contexts),
         }
+        tools = list(dict.fromkeys(
+            tool for document in parsed_docs
+            for tool in ([document.selected_tool] + document.tool_trace)
+            if tool
+        ))
+        self._emit(
+            agent="文档解析智能体", node="document_parser", status="completed",
+            goal="形成供后续智能体复用的统一结构化文档数据",
+            tools=tools[:12],
+            finding=f"已解析{len(parsed_docs)}份文件，提取{sum(len(x.sections) for x in parsed_docs)}个章节、{sum(len(x.tables) for x in parsed_docs)}个表格，形成{len(document_result.issues)}项问题线索。",
+            decision="进入总控路由，由任务类型和文档内容决定后续专项智能体。",
+        )
         return {
             "parsed_docs": parsed_docs,
             "raw_texts": raw_texts,
@@ -237,6 +286,11 @@ class SupervisorAgent:
             }
 
         if state["human_review_completed"]:
+            self._emit(
+                agent=self.name, node="supervisor", status="completed",
+                goal="根据人工复核结果继续执行",
+                decision="人工复核已完成，进入报告生成智能体。",
+            )
             return {
                 "pending_agents": ["report"],
                 "execution_trace": [*state["execution_trace"], "supervisor:report"],
@@ -248,6 +302,13 @@ class SupervisorAgent:
                 for issue in state["issues"]
             )
             next_node: AgentNode = "human_review" if needs_human_review else "report"
+            self._emit(
+                agent=self.name, node="supervisor", status="completed",
+                goal="根据结果复核结论决定是否需要人工介入",
+                finding=f"统一复核后保留{len(state['issues'])}项问题。",
+                decision="进入人工复核。" if needs_human_review else "无需人工复核，直接生成报告。",
+                review_reason="存在高风险、低置信度或明确标记需人工确认的事项。" if needs_human_review else "",
+            )
             return {
                 "pending_agents": [next_node],
                 "execution_trace": [
@@ -292,6 +353,14 @@ class SupervisorAgent:
                 "selected_agents": plan,
                 "reasons": [f"调用方指定核验类型: {effective_type}"],
             }
+        display = {"compliance": "合规审查智能体", "data": "数据核验智能体", "anomaly": "异常分析智能体"}
+        self._emit(
+            agent=self.name, node="supervisor", status="completed",
+            goal="拆解任务并选择需要执行的专项智能体",
+            tools=["LangGraph条件路由", "任务类型识别"],
+            finding="；".join(routing.get("reasons", [])),
+            decision=" → ".join(display.get(node, node) for node in plan) or "直接生成报告",
+        )
         return {
             "pending_agents": plan,
             "routing": routing,
@@ -306,12 +375,23 @@ class SupervisorAgent:
         return state["pending_agents"][0] if state["pending_agents"] else "report"
 
     def _run_compliance(self, state: AgentState) -> dict:
+        self._emit(
+            agent=self.compliance_checker.name, node="compliance", status="running",
+            goal="核验限制性条款、程序完整性、废标依据和法规引用",
+            tools=["确定性合规规则", "Dify工作流", "法规RAG知识库"],
+        )
         result = self.compliance_checker.run_contexts(
             state["document_contexts"],
             state["parsed_docs"],
             state["task"].system_record,
         )
         self._enrich_result_evidence(result, state["document_contexts"])
+        self._emit(
+            agent=result.agent, node="compliance", status="completed",
+            goal="输出有原文证据和依据的合规问题",
+            tools=[str(result.data.get("execution_mode", "本地规则"))],
+            finding=result.summary, decision="将合规发现交给统一结果复核。",
+        )
         return {
             "pending_agents": state["pending_agents"][1:],
             "agent_results": [*state["agent_results"], result],
@@ -320,11 +400,22 @@ class SupervisorAgent:
         }
 
     def _run_data_validation(self, state: AgentState) -> dict:
+        self._emit(
+            agent=self.data_validator.name, node="data", status="running",
+            goal="复算报价、得分、权重、排名并核对跨文档字段一致性",
+            tools=["确定性计算引擎", "跨文档字段比对", "Dify语义补充"],
+        )
         result = self.data_validator.run_contexts(
             state["document_contexts"],
             state["parsed_docs"],
         )
         self._enrich_result_evidence(result, state["document_contexts"])
+        self._emit(
+            agent=result.agent, node="data", status="completed",
+            goal="输出可复算、可定位的数据问题",
+            tools=[str(result.data.get("execution_mode", "本地规则"))],
+            finding=result.summary, decision="将数据发现交给统一结果复核。",
+        )
         return {
             "pending_agents": state["pending_agents"][1:],
             "agent_results": [*state["agent_results"], result],
@@ -333,6 +424,11 @@ class SupervisorAgent:
         }
 
     def _run_anomaly_analysis(self, state: AgentState) -> dict:
+        self._emit(
+            agent=self.anomaly_analyzer.name, node="anomaly", status="running",
+            goal="综合主体、设备、网络、报价和文本信号识别关联异常",
+            tools=["多信号组合规则", "关系数据分析", "Dify语义分析"],
+        )
         result = self.anomaly_analyzer.run_contexts(
             state["document_contexts"],
             state["parsed_docs"],
@@ -340,6 +436,12 @@ class SupervisorAgent:
             relationship_data=state["task"].relationship_data,
         )
         self._enrich_result_evidence(result, state["document_contexts"])
+        self._emit(
+            agent=result.agent, node="anomaly", status="completed",
+            goal="形成异常线索而非直接作出违法认定",
+            tools=[str(result.data.get("execution_mode", "本地规则"))],
+            finding=result.summary, decision="将组合异常交给统一结果复核。",
+        )
         return {
             "pending_agents": state["pending_agents"][1:],
             "agent_results": [*state["agent_results"], result],
@@ -356,6 +458,11 @@ class SupervisorAgent:
             enrich_issue_evidence(issue, contexts)
 
     def _review_results(self, state: AgentState) -> dict:
+        self._emit(
+            agent=self.quality_reviewer.name, node="review", status="running",
+            goal="核验证据、去重并检查各智能体结论质量",
+            tools=["证据完整性检查", "重复问题归并", "结果质量规则"],
+        )
         source_texts = {
             doc.filename: state["raw_texts"].get(doc.file_id, "")
             for doc in state["parsed_docs"]
@@ -391,6 +498,13 @@ class SupervisorAgent:
             pending_agents = [retry_node, "review"]
             review_completed = False
 
+        self._emit(
+            agent=self.quality_reviewer.name, node="review", status="completed",
+            goal="形成统一问题口径并决定重试或人工复核",
+            finding=review_result.summary,
+            decision=(f"退回{review.retry_agent}重试。" if should_retry else "进入总控决策。"),
+        )
+
         return {
             "pending_agents": pending_agents,
             "agent_results": agent_results,
@@ -406,6 +520,14 @@ class SupervisorAgent:
             for issue in state["issues"]
             if issue.risk_level == "高" or issue.requires_human_review
         ]
+        self._emit(
+            agent="人工复核节点", node="human_review", status="waiting_review",
+            goal="由评审人员确认、排除或修正AI候选问题",
+            tools=["原文证据链", "人工复核表单"],
+            finding=f"共有{len(review_issues)}项需要人工确认。",
+            decision="暂停LangGraph，等待人工提交复核结论。",
+            review_reason="问题涉及高风险、证据解释或低置信度判断，系统不得自动作最终认定。",
+        )
         response = interrupt(
             {
                 "task_id": state["task"].task_id,
@@ -494,6 +616,12 @@ class SupervisorAgent:
                 "missed_issue_count": len(missed_items),
             },
         )
+        self._emit(
+            agent="人工复核节点", node="human_review", status="completed",
+            goal="保存人工判断并形成最终三态结论",
+            finding=review_result.summary,
+            decision="进入报告生成智能体。",
+        )
         return {
             "pending_agents": [],
             "agent_results": [*state["agent_results"], review_result],
@@ -512,6 +640,11 @@ class SupervisorAgent:
 
     def _generate_report(self, state: AgentState) -> dict:
         task = state["task"]
+        self._emit(
+            agent=self.report_generator.name, node="report", status="running",
+            goal="汇总最终问题、证据和人工复核结论，生成标准化报告",
+            tools=["报告内容规划", "Word生成", "PDF生成"],
+        )
         report_result = self.report_generator.run(
             state["parsed_docs"],
             state["issues"],
@@ -539,6 +672,12 @@ class SupervisorAgent:
             "docx": f"/api/agent/tasks/{task.task_id}/report.docx",
             "pdf": f"/api/agent/tasks/{task.task_id}/report.pdf",
         }
+        self._emit(
+            agent=self.report_generator.name, node="report", status="completed",
+            goal="生成可交付、可追溯的核验报告",
+            finding=report_result.summary,
+            decision="任务完成，可下载Word、PDF和Markdown报告。",
+        )
         return {
             "pending_agents": [],
             "agent_results": [*state["agent_results"], report_result],

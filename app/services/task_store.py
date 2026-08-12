@@ -15,10 +15,13 @@ class TaskStore:
 
     def save(self, task: TaskRecord) -> None:
         task.updated_at = now_iso()
-        self._path(task.task_id).write_text(
+        path = self._path(task.task_id)
+        temporary_path = path.with_suffix(".json.tmp")
+        temporary_path.write_text(
             task.model_dump_json(indent=2),
             encoding="utf-8",
         )
+        temporary_path.replace(path)
 
     def get(self, task_id: str) -> TaskRecord | None:
         path = self._path(task_id)

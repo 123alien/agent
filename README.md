@@ -78,6 +78,9 @@ http://localhost:8000/
 
 控制台支持多文件上传、任务进度轮询、解析指标、关键字段、问题清单、
 智能体执行结果、原始 JSON 查看，以及 Markdown、Word、PDF 报告下载。
+任务执行期间还会实时展示 LangGraph 当前节点、专项智能体目标、已调用工具、
+当前发现、下一步决策和人工复核原因；“执行轨迹”页保留完整时间线，便于演示、
+验收和问题追溯。对应 API 字段为 `execution_context` 和 `execution_events`。
 
 ## Dify Workflow 接入
 

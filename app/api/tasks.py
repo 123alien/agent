@@ -221,7 +221,7 @@ def run_task(task_id: str) -> None:
     try:
         task.status = "running"
         task_store.save(task)
-        outcome = supervisor_agent.run(task)
+        outcome = supervisor_agent.run(task, _progress_callback(task))
         if outcome.review_request:
             task.status = "waiting_review"
             task.review_request = outcome.review_request
@@ -242,7 +242,9 @@ def resume_task(task_id: str, review: dict) -> None:
     if task is None:
         return
     try:
-        outcome = supervisor_agent.resume(task_id, review)
+        task.status = "running"
+        task_store.save(task)
+        outcome = supervisor_agent.resume(task_id, review, _progress_callback(task))
         if outcome.review_request:
             task.status = "waiting_review"
             task.review_request = outcome.review_request
@@ -257,6 +259,15 @@ def resume_task(task_id: str, review: dict) -> None:
         task_store.save(task)
     if task.status != "waiting_review":
         send_callback(task)
+
+
+def _progress_callback(task: TaskRecord):
+    def update(event: dict) -> None:
+        stamped = {**event, "timestamp": now_iso()}
+        task.execution_events.append(stamped)
+        task.execution_context = stamped
+        task_store.save(task)
+    return update
 
 
 def send_callback(task: TaskRecord) -> None:
