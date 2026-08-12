@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>评标智能核验控制台</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v=20260812-trace2">
 </head>
 <body>
   <div class="shell">
@@ -24,6 +24,7 @@
 
       <section id="createView" class="view active">
         <div class="intro"><h2>上传项目资料，启动五智能体协同核验</h2><p>支持 PDF、DOCX、TXT、XLSX 等文件。系统将自动完成解析、合规审查、数据核验、异常分析与报告生成。</p></div>
+        <div class="trace-intro panel"><div><strong>LangGraph 实时执行可视化已启用</strong><span>任务启动后自动进入详情页，可查看当前智能体、调用工具、阶段发现、下一步决策和完整执行轨迹。</span></div><b>实时追踪</b></div>
         <form id="uploadForm" class="panel upload-panel">
           <div class="form-grid">
             <label><span>项目编号</span><input name="project_id" id="projectId" required placeholder="例如：P-2026-001"></label>
@@ -69,6 +70,6 @@
     </main>
   </div>
   <div class="toast" id="toast"></div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260812-trace2"></script>
 </body>
 </html>
