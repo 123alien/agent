@@ -9,6 +9,7 @@ data/reports/
 data/reviews/
 data/contracts/
 data/project_indexes/
+data/acceptance/
 data/server.*.log
 data/*.sqlite*
 .venv/

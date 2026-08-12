@@ -38,7 +38,7 @@ http://127.0.0.1:8000/docs
 
 ```dotenv
 AGENT_API_TOKEN=至少32位随机字符串
-ALLOWED_ORIGINS=https://你的业务系统域名
+CORS_ALLOWED_ORIGINS=https://你的业务系统域名
 DATA_DIR=./data
 ```
 
