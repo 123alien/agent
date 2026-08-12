@@ -633,6 +633,7 @@ class DocumentParserAgent:
         self,
         files: list[UploadedFileInfo],
         project_name: str,
+        enable_semantic_enhancement: bool = True,
     ) -> tuple[list[ParsedDocument], AgentResult, dict[str, str]]:
         parsed_docs: list[ParsedDocument] = []
         raw_texts: dict[str, str] = {}
@@ -685,6 +686,7 @@ class DocumentParserAgent:
                 content.tool_trace.append("跳过语义增强: 未填写示范模板")
             if (
                 text.strip()
+                and enable_semantic_enhancement
                 and document_semantic_enhancer.enabled
                 and not unfilled_template
                 and (

@@ -28,6 +28,35 @@
 - 对方系统可调用 `GET /api/agent/capabilities` 获取当前 API、智能体契约及支持能力。
 - 所有任务响应包含 `api_version`；v1 系列只能增加向后兼容的可选字段。
 
+### 2.1 独立文档解析接口
+
+`POST /api/v1/agents/document-parser` 使用 `multipart/form-data`：
+
+- `request`：序列化后的 `AgentRequest` v1 JSON，必须提供 `input.project_name`。
+- `files`：一个或多个 PDF、DOCX、TXT、Markdown 或 XLSX 文件。
+- `X-API-Key`：配置 `AGENT_API_TOKEN` 后必须提供。
+
+`request` 示例：
+
+```json
+{
+  "contract_version": "1.0.0",
+  "request_id": "REQ-DOC-001",
+  "project_id": "P-001",
+  "task_id": "",
+  "input": {"project_name": "某市信息化平台项目"},
+  "options": {
+    "enable_dify": true,
+    "enable_human_review": true,
+    "trace_enabled": true
+  }
+}
+```
+
+接口返回统一 `AgentResponse`。结构化解析结果位于 `result.documents`，
+可追溯问题位于 `findings`。`enable_dify=false` 时仅执行确定性解析、OCR、
+版面与视觉规则，不调用 Dify 文档语义增强工作流。
+
 ## 3. DocumentContext
 
 `DocumentContext` 是所有智能体共享的唯一文档事实来源。
