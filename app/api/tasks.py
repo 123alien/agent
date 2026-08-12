@@ -27,6 +27,7 @@ from app.services.remote_files import RemoteFileError, download_remote_file
 from app.services.file_parser import document_tool_registry
 from app.services.task_store import task_store
 from app.services.time_utils import now_iso
+from app.services.deliverable_service import create_deliverable_xlsx
 
 router = APIRouter()
 
@@ -523,6 +524,20 @@ def get_task_deliverables(task_id: str, download: bool = False):
     if download:
         headers["Content-Disposition"] = f'attachment; filename="{task_id}_deliverables.json"'
     return JSONResponse(content=payload, headers=headers)
+
+
+@router.get("/tasks/{task_id}/deliverables/{kind}.xlsx")
+def download_task_deliverable_xlsx(task_id: str, kind: str) -> FileResponse:
+    if kind not in {"parse", "compliance", "data", "anomaly"}:
+        raise HTTPException(status_code=404, detail="不支持的成果类型")
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    payload = _task_deliverables(task)
+    labels = {"parse": "结构化解析数据包", "compliance": "合规问题清单", "data": "数据核验结果", "anomaly": "异常预警与围串标线索"}
+    path = settings.reports_dir / f"{task_id}_{kind}.xlsx"
+    create_deliverable_xlsx(payload, kind, path)
+    return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=f"{task_id}_{labels[kind]}.xlsx")
 
 
 @router.get("/tasks/{task_id}/report")
