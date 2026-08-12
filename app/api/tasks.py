@@ -63,6 +63,14 @@ def get_capabilities() -> dict:
         ],
         "report_formats": ["json", "markdown", "docx", "pdf"],
         "task_statuses": ["pending", "running", "waiting_review", "completed", "failed"],
+        "finding_statuses": ["confirmed_issue", "human_review", "passed"],
+        "protocol": {
+            "request": "AgentRequest",
+            "response": "AgentResponse",
+            "error": "AgentError",
+            "evidence": "AgentEvidence",
+            "frozen": True,
+        },
         "authentication": {
             "enabled": bool(settings.agent_api_token),
             "header": "X-API-Key",

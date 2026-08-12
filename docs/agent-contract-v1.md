@@ -58,26 +58,42 @@
 - `confidence`：0 到 1；
 - `requires_human_review`：Boolean。
 
-## 4. 统一问题 AgentIssue
+## 4. 统一请求与响应外壳
+
+所有独立智能体服务使用 `AgentRequest` 和 `AgentResponse`，JSON 中未知字段将被拒绝。
+
+`AgentRequest` 固定包含：`contract_version`、`request_id`、`project_id`、`task_id`、`input`、`options`。
+
+`AgentResponse` 固定包含：`contract_version`、`request_id`、`agent`、`status`、`summary`、`result`、`findings`、`warnings`、`errors`、`execution`。
+
+## 5. 统一问题 AgentFinding
 
 所有审查智能体必须输出同一种问题结构：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| issue_id | string | 是 | 稳定问题编号 |
+| finding_id | string | 是 | 稳定问题编号 |
 | agent | enum | 是 | compliance、data、anomaly、human_review |
 | risk_level | enum | 是 | 高、中、低 |
 | issue_type | string | 是 | 问题类型 |
 | description | string | 是 | 事实性描述 |
-| evidence | array[EvidenceRef] | 是 | 至少一条可定位证据 |
+| evidence | array[AgentEvidence] | 是 | 可定位证据；passed 检查项可为空 |
 | basis | string | 是 | 判断依据；不得编造 |
 | suggestion | string | 是 | 修改或复核建议 |
-| assessment | enum | 是 | 明确问题、待人工判断 |
+| final_status | enum | 是 | confirmed_issue、human_review、passed |
 | confidence | number | 是 | 0 到 1 |
 | requires_human_review | boolean | 是 | 是否进入人工复核 |
 | rule_id | string | 否 | 命中的确定性规则 |
 
-`EvidenceRef`：
+三态含义：
+
+- `confirmed_issue`：规则已确认或人工确认存在问题；
+- `human_review`：仅形成机器线索，等待人工确认；
+- `passed`：确认未发现问题或人工判定为误报。
+
+`not_detected`、`not_checked`、`low_confidence`、`mismatch`、`uncertain` 必须映射为 `human_review`。只有人工确认存在问题后才能转为 `confirmed_issue`。
+
+`AgentEvidence`：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -85,10 +101,18 @@
 | quote | string | 必须逐字存在于原文 |
 | page | integer/null | 页码 |
 | section | string | 章节 |
-| source_type | enum | text、table、metadata、derived |
+| source_type | enum | text、table、metadata、visual、derived |
 | derived_from | array | 派生证据引用；非派生证据为空 |
 
-## 5. 智能体职责与输入输出
+## 6. 统一错误 AgentError
+
+错误字段固定为：`code`、`message`、`retryable`、`stage`、`details`、`trace_id`。
+
+冻结错误码：`INVALID_REQUEST`、`FILE_PARSE_FAILED`、`OCR_FAILED`、`MODEL_UNAVAILABLE`、`KNOWLEDGE_RETRIEVAL_FAILED`、`AGENT_WORKFLOW_TIMEOUT`、`EVIDENCE_NOT_FOUND`、`OUTPUT_VALIDATION_FAILED`、`INTERNAL_ERROR`。
+
+外部响应与正式报告不得暴露密钥、堆栈和供应商内部错误；真实异常仅进入服务日志。
+
+## 7. 智能体职责与输入输出
 
 ### 5.1 文档解析智能体
 
@@ -121,7 +145,7 @@
 输出：`ReportResult`。  
 禁止：新增问题、修改证据原文、重新进行法律判断。
 
-## 6. Dify 边界
+## 8. Dify 边界
 
 Dify 负责：候选语义提取、法规检索、批量合规判断、语言摘要。  
 后端负责：文件解析、OCR、字段标准化、计算、缓存、去重、证据校验、调度、人工复核和报告持久化。
@@ -134,7 +158,7 @@ Dify 输入使用以下固定名称：
 - 异常分析：`parsed_documents`、`compliance_results`、`validation_results`、`relationship_data`
 - 报告生成：`agent_results`、`human_review_results`
 
-## 7. 不可破坏的校验规则
+## 9. 不可破坏的校验规则
 
 1. `requires_human_review`、`is_issue` 必须是 Boolean。
 2. `evidence.quote` 必须能在对应原文或结构化来源中定位。
@@ -144,7 +168,7 @@ Dify 输入使用以下固定名称：
 6. 同一 `file_hash + workflow_version + ruleset_version` 必须可命中缓存。
 7. 所有运行记录必须保存工作流版本、模型、提示词版本和耗时。
 
-## 8. 当前迁移顺序
+## 10. 当前迁移顺序
 
 1. 冻结本规范和 JSON Schema。
 2. 现有解析结果适配为 `DocumentContext`。
