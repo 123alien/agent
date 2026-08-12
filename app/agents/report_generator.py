@@ -21,6 +21,7 @@ class ReportGeneratorAgent:
         human_review: dict | None = None,
         output_type: str = "综合智能核验报告",
         template_type: str = "标准审查报告",
+        enable_dify: bool = True,
     ) -> AgentResult:
         agent_results = agent_results or []
         human_review = human_review or {}
@@ -60,6 +61,8 @@ class ReportGeneratorAgent:
         execution_mode = "deterministic"
         dify_errors: list[str] = []
         if (
+            enable_dify
+            and
             settings.report_generator_workflow_version.startswith("2.")
             and dify_client.report_generator_enabled
         ):

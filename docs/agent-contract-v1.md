@@ -209,6 +209,17 @@
 输出：`ReportResult`。  
 禁止：新增问题、修改证据原文、重新进行法律判断。
 
+独立服务接口：`POST /api/v1/agents/report-generator`。
+
+- `input.documents`：文档解析接口返回的 `result.documents`。
+- `input.upstream_responses`：必填，前四个智能体的完整 `AgentResponse[]`；报告只使用其中的最终三态结论和证据。
+- `input.human_review_results`：人工复核对象；未完成复核时传 `{}`，报告自动标记为“待复核版”。
+- `input.output_type`：报告业务类型，例如“综合智能核验报告”“合规审查专项报告”。
+- `input.template_type`：模板类型，例如“标准审查报告”“详细审查报告”。
+- `input.project_name`：报告项目名称。
+
+成功后 `result.report_files` 返回 Markdown、DOCX、PDF 下载地址，格式为 `/api/v1/agents/reports/{report_id}.md|docx|pdf`。报告生成接口不得新增问题、改变最终状态或修改证据原文。
+
 ## 8. Dify 边界
 
 Dify 负责：候选语义提取、法规检索、批量合规判断、语言摘要。  

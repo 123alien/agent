@@ -1,18 +1,21 @@
 import json
+import re
 import shutil
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Body, File, Form, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
 from app.agents.document_parser import DocumentParserAgent
 from app.agents.compliance_checker import ComplianceCheckerAgent
 from app.agents.data_validator import DataValidatorAgent
 from app.agents.anomaly_analyzer import AnomalyAnalyzerAgent
+from app.agents.report_generator import ReportGeneratorAgent
 from app.api.file_helpers import infer_file_type, safe_storage_name
 from app.core.config import ensure_data_dirs, settings
 from app.schemas.agent_protocol import (
@@ -23,17 +26,23 @@ from app.schemas.agent_protocol import (
     response_from_agent_result,
 )
 from app.schemas.document_context import DocumentContext
-from app.schemas.task import AgentResult, EvidenceRef, Issue, ParsedDocument, UploadedFileInfo
+from app.schemas.task import (
+    AgentResult, EvidenceRef, Issue, ParsedDocument, TaskRecord, TaskResult,
+    UploadedFileInfo,
+)
 from app.services.document_context import build_document_context
 from app.services.evidence_locator import enrich_issue_evidence
+from app.services.report_service import create_reports
 
 
 router = APIRouter()
 
 
 _UPSTREAM_AGENT_NAMES = {
+    "document_parser": "文档解析智能体",
     "compliance_review": "合规审查智能体",
     "data_verification": "数据核验智能体",
+    "anomaly_analysis": "异常分析智能体",
 }
 
 
@@ -531,3 +540,107 @@ def run_anomaly_analysis(
             execution_mode="standalone_api",
         ),
     )
+
+
+@router.post(
+    "/report-generator",
+    response_model=AgentResponse,
+    summary="Run the standalone report generator agent",
+)
+def run_report_generator(
+    request: Annotated[AgentRequest, Body()],
+) -> AgentResponse | JSONResponse:
+    documents_raw = request.input.get("documents")
+    upstream_raw = request.input.get("upstream_responses")
+    human_review = request.input.get("human_review_results", {})
+    output_type = request.input.get("output_type", "综合智能核验报告")
+    template_type = request.input.get("template_type", "标准审查报告")
+    project_name = str(request.input.get("project_name", request.project_id)).strip()
+    if not isinstance(documents_raw, list) or not documents_raw:
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="input.documents 必须是非空的文档解析结果数组", status_code=422,
+            agent="report_generator", stage="report_generator")
+    if not isinstance(upstream_raw, list) or not upstream_raw:
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="input.upstream_responses 必须是非空的 AgentResponse 数组", status_code=422,
+            agent="report_generator", stage="input_validation")
+    if not isinstance(human_review, dict):
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="input.human_review_results 必须是对象", status_code=422,
+            agent="report_generator", stage="input_validation")
+    try:
+        documents = [ParsedDocument.model_validate(item) for item in documents_raw]
+        upstream = [AgentResponse.model_validate(item) for item in upstream_raw]
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        report_id = request.task_id or f"R{uuid.uuid4().hex[:12]}"
+        task = TaskRecord(
+            task_id=report_id, project_id=request.project_id,
+            project_name=project_name or request.project_id, check_type="full",
+            status="completed", output_type=output_type, template_type=template_type,
+            created_at=now, updated_at=now,
+        )
+    except ValidationError as exc:
+        return _error_response(request_id=request.request_id, code="OUTPUT_VALIDATION_FAILED",
+            message="报告输入不符合冻结协议", status_code=422,
+            details={"validation_errors": exc.errors(include_url=False, include_input=False)},
+            agent="report_generator", stage="input_validation")
+
+    agent_results = [_upstream_agent_result(item) for item in upstream]
+    issues = [issue for result in agent_results for issue in result.issues]
+    started_at = time.perf_counter()
+    try:
+        report_result = ReportGeneratorAgent().run(
+            documents, issues, task=task, agent_results=agent_results,
+            human_review=human_review, output_type=output_type,
+            template_type=template_type, enable_dify=request.options.enable_dify,
+        )
+        task_result = TaskResult(
+            summary=report_result.summary, parsed_documents=documents,
+            agent_results=[*agent_results, report_result], issues=issues,
+        )
+        paths = create_reports(task, task_result)
+    except Exception as exc:
+        return _error_response(request_id=request.request_id, code="INTERNAL_ERROR",
+            message="报告生成执行失败", status_code=500, retryable=True,
+            details={"error_type": type(exc).__name__}, agent="report_generator",
+            stage="report_generator")
+
+    base_url = f"/api/v1/agents/reports/{report_id}"
+    result = {
+        **report_result.data,
+        "project_id": request.project_id,
+        "report_id": report_id,
+        "source_agents": [item.agent for item in upstream],
+        "report_files": {
+            "markdown": f"{base_url}.md", "docx": f"{base_url}.docx",
+            "pdf": f"{base_url}.pdf",
+        },
+        "generated_files": {key: str(path) for key, path in paths.items()},
+    }
+    return response_from_agent_result(
+        request_id=request.request_id, agent_result=report_result, result=result,
+        execution=AgentExecution(
+            duration_ms=int((time.perf_counter() - started_at) * 1000),
+            model="Dify报告生成Workflow" if (
+                request.options.enable_dify and settings.dify_report_generator_api_key
+            ) else "deterministic-report-engine",
+            workflow_version=settings.report_generator_workflow_version,
+            ruleset_version=settings.ruleset_version,
+            execution_mode="standalone_api",
+        ),
+    )
+
+
+@router.get("/reports/{report_id}.{extension}")
+def download_standalone_report(report_id: str, extension: str) -> FileResponse:
+    media_types = {
+        "md": "text/markdown; charset=utf-8",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pdf": "application/pdf",
+    }
+    if extension not in media_types or not re.fullmatch(r"[A-Za-z0-9_-]+", report_id):
+        raise HTTPException(status_code=404, detail="报告不存在")
+    path = settings.reports_dir / f"{report_id}.{extension}"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="报告尚未生成")
+    return FileResponse(path, media_type=media_types[extension], filename=path.name)

@@ -244,6 +244,59 @@ class StandaloneDocumentParserApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("relationship_data", response.json()["errors"][0]["message"])
 
+    @patch("app.api.agents.create_reports")
+    @patch("app.api.agents.ReportGeneratorAgent.run")
+    def test_report_generator_creates_download_contract(self, mock_run, mock_create) -> None:
+        document = ParsedDocument(
+            file_id="F-1", filename="评标报告.pdf", file_type="评标报告", text_length=20,
+        )
+        mock_run.return_value = AgentResult(
+            agent="报告生成智能体", summary="报告已生成。",
+            data={"report_status": "待复核版", "pending": 1},
+        )
+        mock_create.return_value = {
+            "markdown": settings.reports_dir / "REPORT-1.md",
+            "docx": settings.reports_dir / "REPORT-1.docx",
+            "pdf": settings.reports_dir / "REPORT-1.pdf",
+        }
+        upstream = {
+            "contract_version": "1.0.0", "request_id": "REQ-UP-2",
+            "agent": "anomaly_analysis", "status": "completed", "summary": "发现线索",
+            "result": {}, "warnings": [], "errors": [], "execution": {},
+            "findings": [{
+                "finding_id": "A-001", "final_status": "human_review",
+                "risk_level": "高", "finding_type": "多信号组合异常",
+                "description": "多个信号重合。", "basis": "仅为线索。",
+                "suggestion": "建议人工复核。", "requires_human_review": True,
+                "confidence": 0.8,
+                "evidence": [{"quote": "B/C机器码一致", "file_name": "元数据.xlsx"}],
+            }],
+        }
+        response = self.client.post("/api/v1/agents/report-generator", json={
+            "request_id": "REQ-REPORT-001", "project_id": "P-001", "task_id": "REPORT-1",
+            "input": {
+                "project_name": "某市信息化项目",
+                "documents": [document.model_dump(mode="json")],
+                "upstream_responses": [upstream],
+                "human_review_results": {},
+                "output_type": "综合智能核验报告",
+                "template_type": "标准审查报告",
+            },
+            "options": {"enable_dify": False},
+        }, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["agent"], "report_generator")
+        self.assertEqual(body["result"]["report_id"], "REPORT-1")
+        self.assertEqual(
+            body["result"]["report_files"]["docx"],
+            "/api/v1/agents/reports/REPORT-1.docx",
+        )
+        self.assertFalse(mock_run.call_args.kwargs["enable_dify"])
+        passed_issues = mock_run.call_args.args[1]
+        self.assertEqual(passed_issues[0].evidence, ["B/C机器码一致"])
+        mock_create.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
