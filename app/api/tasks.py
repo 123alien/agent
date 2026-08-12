@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.agents.supervisor import supervisor_agent
 from app.api.file_helpers import infer_file_type, safe_storage_name
@@ -463,6 +463,66 @@ def get_task(task_id: str) -> TaskRecord:
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return task
+
+
+def _task_deliverables(task: TaskRecord) -> dict:
+    result = task.result
+    if result is None:
+        raise HTTPException(status_code=409, detail="任务尚未形成最终成果")
+    documents = [item.model_dump(mode="json") for item in result.parsed_documents]
+    issues = [item.model_dump(mode="json") for item in result.issues]
+    agent_results = {item.agent: item for item in result.agent_results}
+    document_package = {
+        "project_id": task.project_id,
+        "project_name": task.project_name,
+        "documents": documents,
+        "score_details": [x for doc in documents for x in doc.get("score_details", [])],
+        "score_summaries": [x for doc in documents for x in doc.get("score_summaries", [])],
+        "rejection_records": [x for doc in documents for x in doc.get("rejection_records", [])],
+        "evaluation_opinions": [x for doc in documents for x in doc.get("evaluation_opinions", [])],
+        "candidate_rankings": [x for doc in documents for x in doc.get("candidate_rankings", [])],
+    }
+    def by_agent(name: str) -> list[dict]:
+        return [x for x in issues if x.get("agent") == name]
+    compliance = by_agent("合规审查智能体")
+    data = by_agent("数据核验智能体")
+    anomaly = by_agent("异常分析智能体")
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "document_parse_package": document_package,
+        "compliance_issue_list": {
+            "summary": agent_results.get("合规审查智能体").summary if agent_results.get("合规审查智能体") else "",
+            "issues": compliance,
+        },
+        "data_verification_result": {
+            "summary": agent_results.get("数据核验智能体").summary if agent_results.get("数据核验智能体") else "",
+            "issues": data,
+        },
+        "anomaly_warning_report": {
+            "summary": agent_results.get("异常分析智能体").summary if agent_results.get("异常分析智能体") else "",
+            "warnings": anomaly,
+            "positioning": "异常线索仅用于风险预警，不直接认定围串标行为。",
+        },
+        "reports": result.report_files,
+        "standardized_evaluation_report": {
+            "available": task.output_type == "标准化评标报告" and task.status == "completed",
+            "requires_review_completion": task.status == "waiting_review",
+            "url": result.report_files.get("docx", "") if task.output_type == "标准化评标报告" else "",
+        },
+    }
+
+
+@router.get("/tasks/{task_id}/deliverables")
+def get_task_deliverables(task_id: str, download: bool = False):
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    payload = _task_deliverables(task)
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{task_id}_deliverables.json"'
+    return JSONResponse(content=payload, headers=headers)
 
 
 @router.get("/tasks/{task_id}/report")
