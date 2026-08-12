@@ -52,10 +52,41 @@ def report_suggestion(issue, report_status: str) -> str:
     ).replace("请人工查看", "请依据已完成的人工复核记录核对")
 
 
-def confidence_rows(issue) -> tuple[tuple[str, str], ...]:
+def report_basis(issue, report_status: str) -> str:
+    basis = issue.basis or "待补充判断依据"
+    if report_status != "正式核验版" or issue_needs_review(issue):
+        return basis
+    replacements = (
+        ("需人工复核适用性", "经人工复核，确认该依据支持将本事项列入问题清单"),
+        ("需人工复核", "经人工复核确认"),
+        ("建议人工复核", "经人工复核确认"),
+        ("请结合完整采购需求和适用法规对该条款进行人工复核", "经人工复核，确认该条款存在审查风险"),
+    )
+    for old, new in replacements:
+        basis = basis.replace(old, new)
+    if "人工复核" not in basis:
+        basis = f"经人工复核，确认该事项列入问题清单。{basis}"
+    return basis
+
+
+def report_conclusion_status(issue, report_status: str) -> str:
+    if issue_needs_review(issue):
+        return "待人工复核"
+    if report_status == "正式核验版":
+        return "经人工复核确认，列入问题清单"
+    return "规则确认的明确问题"
+
+
+def report_status_label(report_status: str) -> str:
+    if report_status == "正式核验版":
+        return "正式核验版 / 人工复核已完成"
+    return report_status
+
+
+def confidence_rows(issue, report_status: str = "待复核版") -> tuple[tuple[str, str], ...]:
     detection = f"{issue.confidence:.0%}" if issue.detection_status else "不适用"
     evidence = "完整" if issue.evidence or issue.evidence_refs else "不足"
-    conclusion = "待人工复核" if issue_needs_review(issue) else "人工已确认/规则已确认"
+    conclusion = report_conclusion_status(issue, report_status)
     return (("检测置信度", detection), ("证据完整度", evidence), ("结论状态", conclusion))
 
 
@@ -84,7 +115,7 @@ def create_markdown_report(task: TaskRecord, result: TaskResult) -> Path:
         f"- 项目编号: {task.project_id}",
         f"- 核验类型: {task.check_type}",
         f"- 核验结论: {final_report_conclusion(result)}",
-        f"- 报告状态: {_report_data(result).get('report_status', '待复核版')}",
+        f"- 报告状态: {report_status_label(str(_report_data(result).get('report_status', '待复核版')))}",
         "",
         "## 自动路由",
         "",
@@ -141,12 +172,12 @@ def create_markdown_report(task: TaskRecord, result: TaskResult) -> Path:
                     f"- 自动判断: {issue.assessment}",
                     f"- 检测置信度: {issue.confidence:.0%}" if issue.detection_status else "- 检测置信度: 不适用",
                     f"- 证据完整度: {'完整' if issue.evidence or issue.evidence_refs else '不足'}",
-                    f"- 结论状态: {'待人工复核' if issue_needs_review(issue) else '人工已确认/规则已确认'}",
+                    f"- 结论状态: {report_conclusion_status(issue, str(_report_data(result).get('report_status', '待复核版')))}",
                     f"- 风险等级: {issue.risk_level}",
                     f"- 来源文件: {issue.source_file or '未定位'}",
                     f"- 位置: {issue.source_location or '未定位'}",
                     f"- 问题描述: {issue.description}",
-                    f"- 依据: {issue.basis or '待人工补充'}",
+                    f"- 依据: {report_basis(issue, str(_report_data(result).get('report_status', '待复核版')))}",
                     f"- 建议: {report_suggestion(issue, _report_data(result).get('report_status', '待复核版'))}",
                     "",
                 ]
@@ -508,7 +539,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
             ("报告编号", f"{task.task_id}-R01"),
             ("报告类型", report_type),
             ("文档模板", template_type),
-            ("报告状态", report_status),
+            ("报告状态", report_status_label(report_status)),
             ("生成日期", now.strftime("%Y年%m月%d日")),
             ("核验范围", f"{len(result.parsed_documents)}份资料、{len(result.agent_results)}个执行节点"),
         ],
@@ -808,12 +839,12 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
             ("证据位置", issue.source_location or "未定位"),
             ("问题描述", issue.description),
             ("原文证据", evidence),
-            ("判断依据", issue.basis or "待人工补充"),
+            ("判断依据", report_basis(issue, report_status)),
             ("修改建议", report_suggestion(issue, report_status)),
-            ("最终状态", "待人工复核" if issue_needs_review(issue) else "明确问题"),
+            ("最终状态", report_conclusion_status(issue, report_status)),
             ("检测状态", issue.detection_status or "不适用"),
-            *confidence_rows(issue),
-            ("人工复核", "需要" if issue_needs_review(issue) else "已完成或无需复核"),
+            *confidence_rows(issue, report_status),
+            ("人工复核", "待完成" if issue_needs_review(issue) else ("已完成" if report_status == "正式核验版" else "无需复核")),
         ]
         _add_label_value_table(document, rows)
 

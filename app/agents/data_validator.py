@@ -155,6 +155,10 @@ class DataValidatorAgent:
         payload: dict,
         source_text: str,
     ) -> list[Issue]:
+        # 自查表中的复选框/OCR符号和审查问题清单不属于业务数据字段，
+        # 语义模型不应把它们转成项目字段冲突或解析遗漏。
+        if "公平竞争" in doc.filename and "自查" in doc.filename:
+            return []
         issues: list[Issue] = []
         for item in payload.get("issues", []):
             if not isinstance(item, dict) or item.get("is_issue") is not True:

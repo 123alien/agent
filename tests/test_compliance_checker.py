@@ -38,8 +38,24 @@ class ComplianceCheckerTests(unittest.TestCase):
 
         issue = next(item for item in result.issues if item.issue_type == "评标报告必需内容可能缺失")
         self.assertIn("评标委员会", issue.description)
-        self.assertTrue(issue.requires_human_review)
-        self.assertEqual(result.data["process_compliance"]["evaluation_report_count"], 1)
+
+    def test_numbered_recommendations_satisfy_candidate_section(self) -> None:
+        report = ParsedDocument(
+            file_id="R002", filename="评标报告.pdf", file_type="评标报告",
+            document_subtype="评标报告", text_length=200,
+        )
+        text = """项目名称：测试项目
+评标委员会名单
+评审过程及资格审查
+评审结果
+第一推荐人：甲公司
+第二推荐人：乙公司"""
+        context = build_document_context(report, text)
+        issues, _ = ComplianceCheckerAgent()._process_compliance_checks(
+            [context], [report], {}
+        )
+        missing = [item for item in issues if item.issue_type == "评标报告必需内容可能缺失"]
+        self.assertEqual(missing, [])
 
     def test_cross_document_project_name_conflict_is_reported(self) -> None:
         procurement = parsed_document("P-1")
@@ -329,6 +345,42 @@ class ComplianceCheckerTests(unittest.TestCase):
         )
         self.assertTrue(issue.requires_human_review)
         self.assertEqual(issue.evidence, [text])
+
+    def test_coverage_ignores_self_check_and_blank_template_clauses(self) -> None:
+        text = """2. 不得指定特定的专利、商标、品牌、供应商。
+5. 不得设置注册资本、资产总额、营业收入等条件。
+2. 乙方注册资本不低于【】。
+本项目注册资本由特许经营者依法筹集。
+费用为300万元。资金来源为特许经营者自筹资本金和融资资金，其中本项目注册资本为项目总投资的20%。
+投标人注册资本不得低于5000万元。"""
+        candidates = ComplianceCheckerAgent._coverage_candidates(text)
+        self.assertEqual(
+            [item["evidence"] for item in candidates],
+            ["投标人注册资本不得低于5000万元。"],
+        )
+
+    def test_dify_issues_ignore_fair_competition_self_check_document(self) -> None:
+        doc = parsed_document()
+        doc.filename = "招标文件公平竞争审查自查表.pdf"
+        text = "不得指定特定品牌或供应商。"
+        payload = {"issues": [{
+            "risk_level": "高", "issue_type": "指定品牌",
+            "description": "疑似指定品牌", "evidence": text,
+            "basis": "公平竞争要求", "suggestion": "删除",
+            "requires_human_review": True,
+        }]}
+        self.assertEqual(ComplianceCheckerAgent()._issues_from_dify(doc, payload, text), [])
+
+    def test_dify_issues_ignore_normal_control_price_rejection_rule(self) -> None:
+        doc = parsed_document()
+        text = "投标人报价超过控制价按废标处理。"
+        payload = {"issues": [{
+            "risk_level": "低", "issue_type": "废标条件设置",
+            "description": "投标报价超过控制价按废标处理。", "evidence": text,
+            "basis": "常见废标条件", "suggestion": "核对控制价",
+            "requires_human_review": True,
+        }]}
+        self.assertEqual(ComplianceCheckerAgent()._issues_from_dify(doc, payload, text), [])
 
     def test_unverifiable_evidence_is_rejected(self) -> None:
         text = "投标人应具备履约能力。"

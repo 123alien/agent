@@ -60,6 +60,7 @@
         <div class="result-head"><div><button class="back-link" id="backBtn">← 返回新建任务</button><h2 id="resultTitle">任务详情</h2><p id="resultMeta"></p></div><div id="statusBadge" class="status-badge">读取中</div></div>
         <div class="progress-panel panel"><div class="progress-top"><strong id="progressText">正在获取任务状态</strong><span id="elapsedText"></span></div><div class="progress-track"><div id="progressBar"></div></div><div id="agentSteps" class="agent-steps"></div></div>
         <div id="metrics" class="metrics"></div>
+        <div id="reviewEntry" class="review-entry"><div><strong>本任务需要人工复核</strong><span>确认或排除待复核问题后，系统将自动生成最终报告。</span></div><button class="primary" id="openReviewBtn">进入人工复核 →</button></div>
         <div class="tabs"><button class="active" data-tab="overview">解析概览</button><button data-tab="materials">资料清单</button><button data-tab="fields">关键字段</button><button data-tab="issues">问题清单 <span id="issueCount">0</span></button><button data-tab="agents">智能体结果</button><button data-tab="raw">原始 JSON</button></div>
         <div class="panel tab-content" id="tabContent"></div>
         <div class="download-bar" id="downloadBar"><strong>核验报告</strong><span>任务完成后可下载标准化报告</span><div><a id="mdDownload">Markdown</a><a id="docxDownload">Word</a><a id="pdfDownload">PDF</a></div></div>

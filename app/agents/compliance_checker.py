@@ -24,7 +24,10 @@ class ComplianceCheckerAgent:
         "评标委员会": ("评标委员会", "评审委员会", "评委名单", "专家名单"),
         "评审过程": ("评标过程", "评审过程", "资格审查", "符合性审查"),
         "评审结果": ("评标结果", "评审结果", "评审结论"),
-        "中标候选人推荐": ("中标候选人", "成交候选人", "推荐意见"),
+        "中标候选人推荐": (
+            "中标候选人", "成交候选人", "推荐意见",
+            "第一推荐人", "第二推荐人", "第三推荐人",
+        ),
     }
     consistency_fields = {
         "project_name": "项目名称",
@@ -89,9 +92,11 @@ class ComplianceCheckerAgent:
         ]
 
         missing_sections: dict[str, list[str]] = {}
+        context_texts = {context.document_id: context.raw_text for context in contexts}
         for doc in report_docs:
             searchable = "\n".join(
                 [
+                    context_texts.get(doc.file_id, ""),
                     *(section.title + "\n" + section.content for section in doc.sections),
                     *(item.evidence for item in doc.evaluation_opinions),
                     *(item.evidence for item in doc.candidate_rankings),
@@ -326,6 +331,10 @@ class ComplianceCheckerAgent:
             text = raw_texts.get(doc.file_id, "")
             if not text.strip():
                 continue
+            # 公平竞争自查表是过程证明材料，内容本身是审查问题清单，
+            # 不应作为采购条件再次送入合规风险提取。
+            if "公平竞争" in doc.filename and "自查" in doc.filename:
+                continue
             chunks = self._split_text(text)
             total_chunks += len(chunks)
 
@@ -505,12 +514,31 @@ class ComplianceCheckerAgent:
                 category = "资格门槛"
             if not category:
                 continue
+            # 空白合同模板、项目公司资本金安排以及公平竞争自查/法规说明，
+            # 都不是对投标人的实际资格条件，不能进入风险条款补审。
+            if cls._is_non_operational_clause(line):
+                continue
             normalized = cls._normalize_clause(line)
             if normalized in seen:
                 continue
             seen.add(normalized)
             candidates.append({"evidence": line, "category": category})
         return candidates[:20]
+
+    @staticmethod
+    def _is_non_operational_clause(line: str) -> bool:
+        compact = re.sub(r"\s+", "", line)
+        if re.search(r"[【\[]\s*[】\]]", compact):
+            return True
+        if "本项目注册资本" in compact or "项目公司注册资本" in compact:
+            return True
+        if "资金来源" in compact and "注册资本" in compact:
+            return True
+        reference_markers = (
+            "不得设置", "禁止设置", "不得指定", "禁止指定",
+            "是否存在", "自查情况", "审查标准", "排除、限制竞争",
+        )
+        return any(marker in compact for marker in reference_markers)
 
     @classmethod
     def _uncovered_candidates(cls, text: str, payload: dict) -> list[dict[str, str]]:
@@ -588,6 +616,10 @@ class ComplianceCheckerAgent:
         payload: dict,
         source_text: str,
     ) -> list[Issue]:
+        # 公平竞争审查自查表描述的是“检查哪些禁止情形”，不是项目实际
+        # 设置的采购条件。它可作为过程资料留存，但不能逐句转成违规问题。
+        if "公平竞争" in doc.filename and "自查" in doc.filename:
+            return []
         issues: list[Issue] = []
         for item in payload.get("issues", []):
             if not isinstance(item, dict):
@@ -599,6 +631,16 @@ class ComplianceCheckerAgent:
                 evidence = [evidence] if evidence else []
             evidence = [str(value).strip() for value in evidence if str(value).strip()]
             if evidence and any(value not in source_text for value in evidence):
+                continue
+            if evidence and all(self._is_non_operational_clause(value) for value in evidence):
+                continue
+            statement = " ".join(
+                [str(item.get("issue_type", "")), str(item.get("description", "")), *evidence]
+            )
+            if (
+                "超过控制价" in statement
+                and any(marker in statement for marker in ("废标", "无效", "否决"))
+            ):
                 continue
             if self._is_resolved_by_document_context(doc, item, evidence):
                 continue

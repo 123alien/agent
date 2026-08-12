@@ -11,6 +11,9 @@ from app.schemas.task import AgentResult, Issue, ParsedDocument, TaskRecord, Tas
 from app.services.report_service import (
     create_docx_report,
     public_warning,
+    report_basis,
+    report_conclusion_status,
+    report_status_label,
     report_suggestion,
     report_display_title,
     select_report_issues,
@@ -33,6 +36,17 @@ class ReportGeneratorTests(unittest.TestCase):
         issue.assessment = "明确问题"
         issue.requires_human_review = False
         self.assertNotIn("请人工查看", report_suggestion(issue, "正式核验版"))
+        issue.basis = "该依据属于原则性依据，需人工复核适用性。"
+        self.assertNotIn("需人工复核", report_basis(issue, "正式核验版"))
+        self.assertIn("经人工复核", report_basis(issue, "正式核验版"))
+        self.assertEqual(
+            report_conclusion_status(issue, "正式核验版"),
+            "经人工复核确认，列入问题清单",
+        )
+        self.assertEqual(
+            report_status_label("正式核验版"),
+            "正式核验版 / 人工复核已完成",
+        )
 
     def test_report_type_scopes_issues_and_template_changes_title(self) -> None:
         result = TaskResult(
@@ -121,7 +135,7 @@ class ReportGeneratorTests(unittest.TestCase):
             self.assertIn("某市政务平台运维项目", text)
             self.assertIn("指定品牌", text)
             self.assertIn("监控工具必须使用甲公司生产的政务云眼V5", table_text)
-            self.assertIn("需要", table_text)
+            self.assertIn("待完成", table_text)
 
     def test_pdf_report_contains_canonical_counts_and_evidence_index(self) -> None:
         task = TaskRecord(

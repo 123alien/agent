@@ -353,6 +353,15 @@ class AnomalyAnalyzerAgent:
         issues: list[Issue] = []
 
         for doc in parsed_docs:
+            # 围串标文本线索只应来自投标/响应文件。采购文件中的反串标规则、
+            # 自查表和法规说明即使出现“IP、MAC、机器码一致”等文字，也不是
+            # 已发生的主体关联事实。
+            if not (
+                doc.document_role == "bid_response"
+                or doc.document_subtype == "响应文件"
+                or doc.file_type == "投标文件"
+            ):
+                continue
             text = raw_texts.get(doc.file_id, "")
             evidence = self._collusion_evidence(text)
             if evidence:

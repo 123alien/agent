@@ -24,7 +24,8 @@ from app.services.contract_service import amount_to_chinese
 from app.services.report_service import (
     confidence_rows, final_agent_conclusion, final_report_conclusion,
     issue_is_confirmed, issue_needs_review, public_warning, report_agent_names,
-    report_display_title, report_suggestion, select_report_issues,
+    report_basis, report_conclusion_status, report_display_title,
+    report_status_label, report_suggestion, select_report_issues,
 )
 
 
@@ -124,7 +125,8 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
     report_data = report_agents[-1].data if report_agents else {}
     package = report_data.get("report_package", {}) if isinstance(report_data, dict) else {}
     project_info = package.get("project_info", {}) if isinstance(package, dict) else {}
-    status = report_data.get("report_status", "待复核版")
+    status = str(report_data.get("report_status", "待复核版"))
+    status_label = report_status_label(status)
     report_type = report_data.get("output_type", "综合智能核验报告")
     template_type = report_data.get("template_type", "标准审查报告")
     report_title = report_display_title(report_type, template_type)
@@ -150,7 +152,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         [_p("核验类型", styles["small"]), _p(task.check_type, styles["small"])],
         [_p("报告类型", styles["small"]), _p(report_type, styles["small"])],
         [_p("文档模板", styles["small"]), _p(template_type, styles["small"])],
-        [_p("报告状态", styles["small"]), _p(status, styles["small"])],
+        [_p("报告状态", styles["small"]), _p(status_label, styles["small"])],
         [_p("资料数量", styles["small"]), _p(len(result.parsed_documents), styles["small"])],
         [_p("核验结论", styles["small"]), _p(final_report_conclusion(result, report_issues), styles["small"])],
     ]
@@ -300,16 +302,16 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         evidence = "；".join(issue.evidence) or "；".join(ref.quote for ref in issue.evidence_refs) or "未提供"
         for label, value in (
             ("问题编号", issue.issue_id or f"R-{index:03d}"),
-            ("最终状态", "待人工复核" if issue_needs_review(issue) else "明确问题"),
+            ("最终状态", report_conclusion_status(issue, status)),
             ("检测状态", issue.detection_status or "不适用"),
             ("问题描述", issue.description),
             ("原文证据", evidence),
-            ("判断依据", issue.basis or "待人工补充"),
+            ("判断依据", report_basis(issue, status)),
             ("修改建议", report_suggestion(issue, status)),
             ("来源智能体", issue.agent),
             ("来源位置", issue.source_location or "未定位"),
-            *confidence_rows(issue),
-            ("人工复核", "需要" if issue_needs_review(issue) else "已完成或无需复核"),
+            *confidence_rows(issue, status),
+            ("人工复核", "待完成" if issue_needs_review(issue) else ("已完成" if status == "正式核验版" else "无需复核")),
         ):
             story.append(_label_value_p(label, value, styles["body"]))
     story.append(_p("七、专项智能体结论", styles["h1"]))
@@ -381,7 +383,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         bottomMargin=20 * mm,
         title=f"{project_info.get('project_name') or task.project_name}智能核验报告",
     )
-    document.build(story, onFirstPage=_page_footer, onLaterPages=_report_page_decorator(report_title, status))
+    document.build(story, onFirstPage=_page_footer, onLaterPages=_report_page_decorator(report_title, status_label))
     return path
 
 

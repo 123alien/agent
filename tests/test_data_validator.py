@@ -27,6 +27,27 @@ class DataValidatorTests(unittest.TestCase):
         )
         self.text = "服务期限为12个月。合同服务期限为10个月。"
 
+    def test_self_check_form_does_not_generate_semantic_data_issues(self) -> None:
+        self.doc.filename = "招标文件公平竞争审查自查表.pdf"
+        text = "5. 设置注册资本等条件。□有 □无"
+        payload = {"issues": [{
+            "is_issue": True,
+            "risk_level": "中",
+            "issue_type": "文本解析遗漏",
+            "description": "复选框未提取",
+            "field_name": "check_result",
+            "value_1": "有",
+            "value_2": "未提取",
+            "evidence": ["设置注册资本等条件。", "□有 □无"],
+            "basis": "疑似遗漏",
+            "suggestion": "人工确认",
+            "requires_human_review": True,
+        }]}
+        self.assertEqual(
+            DataValidatorAgent()._issues_from_dify(self.doc, payload, text),
+            [],
+        )
+
     def test_shared_context_contract_is_recorded(self) -> None:
         context = build_document_context(self.doc, self.text)
         with patch.object(

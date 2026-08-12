@@ -46,6 +46,9 @@ class AnomalyAnalyzerTests(unittest.TestCase):
 
     def test_specific_collusion_signal_requires_review(self) -> None:
         text = "检查发现不同投标人的投标文件由同一人编制，报价呈规律性差异。"
+        self.doc.file_type = "投标文件"
+        self.doc.document_subtype = "响应文件"
+        self.doc.document_role = "bid_response"
         with patch.object(
             type(dify_client),
             "anomaly_analyzer_enabled",
@@ -59,6 +62,17 @@ class AnomalyAnalyzerTests(unittest.TestCase):
         self.assertEqual(issue.assessment, "待人工判断")
         self.assertTrue(issue.requires_human_review)
         self.assertTrue(all(item in text for item in issue.evidence))
+
+    def test_procurement_anti_collusion_machine_code_rule_is_not_evidence(self) -> None:
+        text = "不同投标人的投标文件制作机器码应当不一致，否则按串通投标处理。"
+        with patch.object(
+            type(dify_client),
+            "anomaly_analyzer_enabled",
+            new_callable=PropertyMock,
+            return_value=False,
+        ):
+            result = self.agent.run([self.doc], {"F1": text})
+        self.assertEqual(result.issues, [])
 
     def test_dify_anomaly_requires_verifiable_evidence(self) -> None:
         self.doc.bid_prices = ["980000"]
@@ -101,6 +115,9 @@ class AnomalyAnalyzerTests(unittest.TestCase):
 
     def test_dify_failure_falls_back_to_local_analysis(self) -> None:
         text = "检查发现不同投标人的投标文件由同一人编制。"
+        self.doc.file_type = "投标文件"
+        self.doc.document_subtype = "响应文件"
+        self.doc.document_role = "bid_response"
         with patch.object(
             type(dify_client),
             "anomaly_analyzer_enabled",

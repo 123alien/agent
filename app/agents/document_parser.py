@@ -867,6 +867,13 @@ class DocumentParserAgent:
                         derived_from=[source_text] if source_text else [],
                     )
                 )
+                visual_evidence = [source_text] if source_text else []
+                visual_evidence.append(
+                    f"第{page}页{target_name}检测：状态={visual_check.status}；"
+                    f"检测置信度={visual_check.confidence:.2f}；"
+                    f"OCR置信度={visual_check.ocr_confidence:.2f}；"
+                    f"识别文字={visual_check.recognized_text or '未识别'}"
+                )
                 issues.append(
                     Issue(
                         agent=self.name,
@@ -880,7 +887,7 @@ class DocumentParserAgent:
                         ),
                         basis="文档形式核验与视觉检测规则",
                         suggestion=f"请人工查看原始文件第 {page} 页，确认{target_name}是否符合文件要求。" if page else f"请人工核对原始文件中的{target_name}。",
-                        evidence=[source_text] if source_text else [],
+                        evidence=visual_evidence,
                         evidence_refs=refs,
                         requires_human_review=True,
                         assessment="待人工判断",
