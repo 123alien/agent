@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>评标智能核验控制台</title>
   <link rel="stylesheet" href="/static/styles.css?v=20260812-deliverables2">
+  <link rel="stylesheet" href="/static/parser.css?v=20260812-agent-parser">
 </head>
 <body>
   <div class="shell">
@@ -63,7 +64,7 @@
         <section id="executionNow" class="execution-now panel"></section>
         <div id="metrics" class="metrics"></div>
         <div id="reviewEntry" class="review-entry"><div><strong>本任务需要人工复核</strong><span>确认或排除待复核问题后，系统将自动生成最终报告。</span></div><button class="primary" id="openReviewBtn">进入人工复核 →</button></div>
-        <div class="tabs"><button class="active" data-tab="overview">解析概览</button><button data-tab="trace">执行轨迹</button><button data-tab="deliverables">成果交付</button><button data-tab="materials">资料清单</button><button data-tab="fields">关键字段</button><button data-tab="issues">问题清单 <span id="issueCount">0</span></button><button data-tab="agents">智能体结果</button><button data-tab="raw">原始 JSON</button></div>
+        <div class="tabs"><button class="active" data-tab="overview">解析概览</button><button data-tab="parser">解析规划</button><button data-tab="trace">执行轨迹</button><button data-tab="deliverables">成果交付</button><button data-tab="materials">资料清单</button><button data-tab="fields">关键字段</button><button data-tab="issues">问题清单 <span id="issueCount">0</span></button><button data-tab="agents">智能体结果</button><button data-tab="raw">原始 JSON</button></div>
         <div class="panel tab-content" id="tabContent"></div>
         <div class="download-bar" id="downloadBar"><strong>核验报告</strong><span>任务完成后可下载标准化报告</span><div><a id="mdDownload">Markdown</a><a id="docxDownload">Word</a><a id="pdfDownload">PDF</a></div></div>
       </section>

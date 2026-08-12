@@ -231,6 +231,37 @@ class DocumentQualityCheck(BaseModel):
     requires_human_review: bool = False
 
 
+class ParsePlan(BaseModel):
+    strategy: str
+    source_format: str
+    planned_tools: list[str] = Field(default_factory=list)
+    required_outputs: list[str] = Field(default_factory=list)
+    quality_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    max_retries: int = Field(default=2, ge=0, le=5)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ParseAttempt(BaseModel):
+    attempt: int = Field(ge=1)
+    action: str
+    tool: str = ""
+    trigger: str = ""
+    outcome: Literal["completed", "failed", "skipped"] = "completed"
+    quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class EvidenceChunk(BaseModel):
+    chunk_id: str
+    document_id: str
+    content: str
+    content_type: Literal["text", "table", "metadata"] = "text"
+    page: int | None = Field(default=None, ge=1)
+    section: str = ""
+    source_hash: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    requires_human_review: bool = False
+
+
 class ParsedDocument(BaseModel):
     file_id: str
     filename: str
@@ -267,6 +298,10 @@ class ParsedDocument(BaseModel):
     seal_signature_checks: list[SealSignatureCheck] = Field(default_factory=list)
     extracted_fields: dict[str, ExtractedField] = Field(default_factory=dict)
     quality_checks: list[DocumentQualityCheck] = Field(default_factory=list)
+    parse_plan: ParsePlan | None = None
+    parse_attempts: list[ParseAttempt] = Field(default_factory=list)
+    quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    evidence_chunks: list[EvidenceChunk] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 

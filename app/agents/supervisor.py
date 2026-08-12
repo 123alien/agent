@@ -13,6 +13,7 @@ from app.agents.anomaly_analyzer import AnomalyAnalyzerAgent
 from app.agents.compliance_checker import ComplianceCheckerAgent
 from app.agents.data_validator import DataValidatorAgent
 from app.agents.document_parser import DocumentParserAgent
+from app.services.project_index import project_index_service
 from app.agents.quality_reviewer import QualityReviewerAgent
 from app.agents.report_generator import ReportGeneratorAgent
 from app.agents.routing_agent import RoutingAgent
@@ -253,10 +254,15 @@ class SupervisorAgent:
             )
             for document in parsed_docs
         ]
+        project_index = project_index_service.build(
+            task.task_id,
+            [chunk for document in parsed_docs for chunk in document.evidence_chunks],
+        )
         document_result.data = {
             **document_result.data,
             "document_context_contract": "1.0.0",
             "document_context_count": len(document_contexts),
+            "project_index": project_index,
         }
         tools = list(dict.fromkeys(
             tool for document in parsed_docs
@@ -268,7 +274,7 @@ class SupervisorAgent:
             goal="形成供后续智能体复用的统一结构化文档数据",
             tools=tools[:12],
             finding=f"已解析{len(parsed_docs)}份文件，提取{sum(len(x.sections) for x in parsed_docs)}个章节、{sum(len(x.tables) for x in parsed_docs)}个表格，形成{len(document_result.issues)}项问题线索。",
-            decision="进入总控路由，由任务类型和文档内容决定后续专项智能体。",
+            decision=f"已建立含{project_index['chunk_count']}条证据切片的项目临时索引；进入总控路由。",
         )
         return {
             "parsed_docs": parsed_docs,

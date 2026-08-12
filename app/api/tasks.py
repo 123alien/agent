@@ -28,6 +28,7 @@ from app.services.file_parser import document_tool_registry
 from app.services.task_store import task_store
 from app.services.time_utils import now_iso
 from app.services.deliverable_service import create_deliverable_xlsx
+from app.services.project_index import project_index_service
 
 router = APIRouter()
 
@@ -464,6 +465,17 @@ def get_task(task_id: str) -> TaskRecord:
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return task
+
+
+@router.get("/tasks/{task_id}/index/search")
+def search_task_index(task_id: str, q: str, limit: int = 8) -> dict:
+    if task_store.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {
+        "task_id": task_id,
+        "query": q,
+        "results": project_index_service.search(task_id, q, limit),
+    }
 
 
 def _task_deliverables(task: TaskRecord) -> dict:

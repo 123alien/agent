@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 
 from app.agents.utils import find_lines, guess_project_name, money_values, unique_keep_order
@@ -11,6 +13,7 @@ from app.schemas.task import (
     DocumentSection,
     DocumentTable,
     EvidenceRef,
+    EvidenceChunk,
     ExtractedField,
     Issue,
     LayoutElement,
@@ -18,6 +21,8 @@ from app.schemas.task import (
     EvaluationOpinion,
     OpeningRecord,
     ParsedDocument,
+    ParseAttempt,
+    ParsePlan,
     RejectionRecord,
     ScoreDetail,
     ScoreSummary,
@@ -42,6 +47,69 @@ HEADING_PATTERNS = [
 ]
 
 NUMBERED_HEADING_PATTERN = re.compile(r"^\d+(?:\.\d+){0,3}[、.．]\s*.+$")
+
+
+def _build_parse_plan(file_info: UploadedFileInfo) -> ParsePlan:
+    suffix = file_info.filename.rsplit(".", 1)[-1].lower() if "." in file_info.filename else "unknown"
+    tools = {
+        "pdf": ["PDF文本与版面解析", "表格还原", "OCR按需回退", "印章与签名视觉检测"],
+        "docx": ["DOCX结构解析", "表格还原", "段落与标题识别"],
+        "txt": ["文本编码识别", "章节与字段抽取"],
+        "xlsx": ["Excel工作表解析", "表格还原", "评分与报价字段抽取"],
+        "xls": ["Excel工作表解析", "表格还原", "评分与报价字段抽取"],
+    }.get(suffix, ["通用文本解析", "文件类型识别"])
+    tools.extend(["确定性质量门", "Dify语义增强按需回退", "证据切片与项目临时索引"])
+    return ParsePlan(
+        strategy="确定性解析优先，质量不达标时自动切换 OCR/语义增强，最终保留人工复核入口",
+        source_format=suffix,
+        planned_tools=tools,
+        required_outputs=["正文", "章节", "表格", "关键字段", "来源定位", "质量报告", "证据切片"],
+        quality_threshold=0.75,
+        max_retries=2,
+        reasons=[f"输入识别为 {file_info.file_type}", "后续智能体需要统一证据定位与可追溯数据"],
+    )
+
+
+def _quality_score(checks: list[DocumentQualityCheck]) -> float:
+    if not checks:
+        return 0.0
+    weights = {"passed": 1.0, "warning": 0.55, "failed": 0.0}
+    return round(sum(weights[x.status] for x in checks) / len(checks), 4)
+
+
+def _chunks(document_id: str, sections: list[DocumentSection], tables: list[DocumentTable]) -> list[EvidenceChunk]:
+    result: list[EvidenceChunk] = []
+    for section_index, section in enumerate(sections):
+        content = section.content.strip()
+        if not content:
+            continue
+        start = 0
+        part = 0
+        while start < len(content):
+            text = content[start:start + 1200].strip()
+            if not text:
+                break
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            result.append(EvidenceChunk(
+                chunk_id=f"{document_id}-s{section_index + 1}-c{part + 1}-{digest[:8]}",
+                document_id=document_id, content=text, page=section.page,
+                section=section.title, source_hash=digest,
+            ))
+            if start + 1200 >= len(content):
+                break
+            start += 1080
+            part += 1
+    for table_index, table in enumerate(tables):
+        text = json.dumps(table.rows, ensure_ascii=False)
+        if not text or text == "[]":
+            continue
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        result.append(EvidenceChunk(
+            chunk_id=f"{document_id}-t{table_index + 1}-{digest[:8]}",
+            document_id=document_id, content=text, content_type="table", page=table.page,
+            section=table.sheet or "表格", source_hash=digest,
+        ))
+    return result
 
 FIELD_PATTERNS: dict[str, tuple[str, list[re.Pattern[str]]]] = {
     "project_name": (
@@ -642,7 +710,13 @@ class DocumentParserAgent:
         semantic_enhancement_count = 0
 
         for file_info in files:
+            parse_plan = _build_parse_plan(file_info)
+            parse_attempts: list[ParseAttempt] = []
             content = parse_file(file_info.saved_path)
+            parse_attempts.append(ParseAttempt(
+                attempt=1, action="执行确定性解析", tool=content.selected_tool,
+                trigger="按文件格式执行首选解析方案", outcome="completed",
+            ))
             text = content.text
             raw_texts[file_info.file_id] = text
             fields = _extract_fields(content, project_name)
@@ -731,9 +805,19 @@ class DocumentParserAgent:
                         f"{content.selected_tool} -> Dify文档语义解析工具"
                     )
                     semantic_enhancement_count += 1
+                    parse_attempts.append(ParseAttempt(
+                        attempt=len(parse_attempts) + 1, action="自动语义补全重试",
+                        tool="Dify文档解析Workflow", trigger="章节或关键字段质量未达到阈值",
+                        outcome="completed",
+                    ))
                 except DifyWorkflowError as exc:
                     content.warnings.append(f"Dify 文档语义增强失败: {exc}")
                     content.tool_trace.append("语义增强失败: Dify文档解析Workflow")
+                    parse_attempts.append(ParseAttempt(
+                        attempt=len(parse_attempts) + 1, action="自动语义补全重试",
+                        tool="Dify文档解析Workflow", trigger="章节或关键字段质量未达到阈值",
+                        outcome="failed",
+                    ))
 
             bidders = (
                 _response_entities(text)
@@ -898,6 +982,15 @@ class DocumentParserAgent:
                 )
             requires_review = any(check.requires_human_review for check in checks)
             failed = any(check.status == "failed" for check in checks)
+            quality_score = _quality_score(checks)
+            for attempt in parse_attempts:
+                attempt.quality_score = quality_score
+            if quality_score < parse_plan.quality_threshold and len(parse_attempts) == 1:
+                parse_attempts.append(ParseAttempt(
+                    attempt=2, action="质量门回退决策", tool="人工复核队列",
+                    trigger=f"质量分 {quality_score:.2f} 低于阈值 {parse_plan.quality_threshold:.2f}，且自动工具无可用增益",
+                    outcome="completed", quality_score=quality_score,
+                ))
             warnings = [*content.warnings, *[check.message for check in checks if check.status != "passed"]]
 
             openings, score_details, score_summaries, table_rankings = _extract_tabular_records(content)
@@ -909,6 +1002,8 @@ class DocumentParserAgent:
             rejection_records = _merge_semantic_records(rejection_records, semantic_rejections)
             evaluation_opinions = _merge_semantic_records(evaluation_opinions, semantic_opinions)
             text_rankings = _merge_semantic_records(text_rankings, semantic_rankings)
+            document_tables = [DocumentTable(page=table.page, page_end=table.page_end, sheet=table.sheet, start_row=table.start_row, continued=table.continued, rows=table.rows) for table in content.tables]
+            evidence_chunks = _chunks(file_info.file_id, sections, document_tables)
             parsed_docs.append(
                 ParsedDocument(
                     file_id=file_info.file_id,
@@ -939,7 +1034,7 @@ class DocumentParserAgent:
                     ocr_applied=content.ocr_applied,
                     ocr_confidence=content.ocr_confidence,
                     sections=sections,
-                    tables=[DocumentTable(page=table.page, page_end=table.page_end, sheet=table.sheet, start_row=table.start_row, continued=table.continued, rows=table.rows) for table in content.tables],
+                    tables=document_tables,
                     layout_elements=[LayoutElement(element_type=element.element_type, text=element.text, page=element.page, order=element.order, bbox=element.bbox, source_name=element.source_name) for element in content.layout_elements],
                     sheet_names=content.sheet_names,
                     opening_records=openings,
@@ -952,6 +1047,10 @@ class DocumentParserAgent:
                     seal_signature_checks=visual_checks,
                     extracted_fields=fields,
                     quality_checks=checks,
+                    parse_plan=parse_plan,
+                    parse_attempts=parse_attempts,
+                    quality_score=quality_score,
+                    evidence_chunks=evidence_chunks,
                     warnings=unique_keep_order(warnings),
                 )
             )
