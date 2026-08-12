@@ -15,11 +15,12 @@ class DataValidatorAgent:
         self,
         contexts: list[DocumentContext],
         parsed_docs: list[ParsedDocument],
+        enable_dify: bool = True,
     ) -> AgentResult:
         raw_texts = {context.document_id: context.raw_text for context in contexts}
         context_map = {context.document_id: context for context in contexts}
         local_result = self._run_locally(parsed_docs, raw_texts)
-        if dify_client.data_validator_enabled:
+        if enable_dify and dify_client.data_validator_enabled:
             dify_result = self._run_with_dify(
                 parsed_docs, raw_texts, context_map, local_result
             )

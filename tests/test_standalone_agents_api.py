@@ -119,6 +119,68 @@ class StandaloneDocumentParserApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["errors"][0]["code"], "INVALID_REQUEST")
 
+    @patch("app.api.agents.DataValidatorAgent.run_contexts")
+    def test_data_verification_reuses_context_and_returns_findings(self, mock_run) -> None:
+        document = ParsedDocument(
+            file_id="F-SCORE", filename="评分汇总表.xlsx", file_type="评审评分表",
+            text_length=50, project_name="某市信息化平台项目",
+        )
+        context = DocumentContext(
+            document_id="F-SCORE", file_name="评分汇总表.xlsx",
+            file_hash="b" * 64, document_type="评审评分表",
+            raw_text="甲公司技术得分45分，总分60分。",
+        )
+        mock_run.return_value = AgentResult(
+            agent="数据核验智能体",
+            summary="发现 1 项计算问题。",
+            issues=[Issue(
+                issue_id="D-1", agent="数据核验智能体", risk_level="高",
+                issue_type="总分复算错误", description="分项合计与总分不一致",
+                evidence=["甲公司技术得分45分，总分60分。"],
+                requires_human_review=True,
+            )],
+            data={"execution_mode": "deterministic"},
+        )
+        payload = {
+            "request_id": "REQ-DATA-001", "project_id": "P-001",
+            "input": {
+                "documents": [document.model_dump(mode="json")],
+                "document_contexts": [context.model_dump(mode="json")],
+            },
+            "options": {"enable_dify": False, "enable_human_review": True, "trace_enabled": True},
+        }
+        response = self.client.post(
+            "/api/v1/agents/data-verification", json=payload, headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertEqual(result["agent"], "data_verification")
+        self.assertEqual(result["findings"][0]["finding_type"], "总分复算错误")
+        self.assertEqual(result["result"]["verified_document_ids"], ["F-SCORE"])
+        self.assertFalse(mock_run.call_args.kwargs["enable_dify"])
+
+    def test_data_verification_rejects_mismatched_document_ids(self) -> None:
+        document = ParsedDocument(
+            file_id="F-1", filename="评分表.xlsx", file_type="评审评分表",
+            text_length=10,
+        )
+        context = DocumentContext(
+            document_id="F-2", file_name="评分表.xlsx", file_hash="c" * 64,
+            document_type="评审评分表", raw_text="评分表",
+        )
+        payload = {
+            "request_id": "REQ-DATA-002", "project_id": "P-001",
+            "input": {
+                "documents": [document.model_dump(mode="json")],
+                "document_contexts": [context.model_dump(mode="json")],
+            },
+        }
+        response = self.client.post(
+            "/api/v1/agents/data-verification", json=payload, headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["errors"][0]["code"], "INVALID_REQUEST")
+
 
 if __name__ == "__main__":
     unittest.main()

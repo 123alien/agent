@@ -71,6 +71,17 @@
 废标依据回查、风险条款审查与证据定位。它不会重新读取或解析原始文件。
 `enable_dify=false` 时仅执行确定性合规规则；启用时复用已配置的 Dify 合规工作流与 RAG。
 
+### 2.3 独立数据核验接口
+
+`POST /api/v1/agents/data-verification` 使用 `application/json`，请求体为
+`AgentRequest` v1。`input.documents` 和 `input.document_contexts` 直接使用文档解析
+接口返回的同名结果，两组文档标识必须完全一致。
+
+接口执行分项得分与权重折算复算、评分合计复算、得分排名与中标候选人排序核对、
+评标报告与开标记录报价比对，以及分项报价与投标总价复算。它不重新解析文件。
+`enable_dify=false` 时只执行确定性计算；启用时在确定性结果基础上调用 Dify 做语义补充，
+无法在原文中逐字定位的模型证据不会进入最终问题清单。
+
 ## 3. DocumentContext
 
 `DocumentContext` 是所有智能体共享的唯一文档事实来源。

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app.agents.document_parser import DocumentParserAgent
 from app.agents.compliance_checker import ComplianceCheckerAgent
+from app.agents.data_validator import DataValidatorAgent
 from app.api.file_helpers import infer_file_type, safe_storage_name
 from app.core.config import ensure_data_dirs, settings
 from app.schemas.agent_protocol import (
@@ -289,6 +290,110 @@ def run_compliance_review(
                 request.options.enable_dify and settings.dify_compliance_api_key
             ) else "deterministic-rules",
             workflow_version=settings.compliance_workflow_version,
+            ruleset_version=settings.ruleset_version,
+            execution_mode="standalone_api",
+        ),
+    )
+
+
+@router.post(
+    "/data-verification",
+    response_model=AgentResponse,
+    summary="Run the standalone data verification agent",
+)
+def run_data_verification(
+    request: Annotated[AgentRequest, Body()],
+) -> AgentResponse | JSONResponse:
+    documents_raw = request.input.get("documents")
+    contexts_raw = request.input.get("document_contexts")
+    if not isinstance(documents_raw, list) or not documents_raw:
+        return _error_response(
+            request_id=request.request_id,
+            code="INVALID_REQUEST",
+            message="input.documents 必须是非空的文档解析结果数组",
+            status_code=422,
+            agent="data_verification",
+            stage="data_verification",
+        )
+    if not isinstance(contexts_raw, list) or not contexts_raw:
+        return _error_response(
+            request_id=request.request_id,
+            code="INVALID_REQUEST",
+            message="input.document_contexts 必须是非空的 DocumentContext v1 数组",
+            status_code=422,
+            agent="data_verification",
+            stage="data_verification",
+        )
+    try:
+        documents = [ParsedDocument.model_validate(item) for item in documents_raw]
+        contexts = [DocumentContext.model_validate(item) for item in contexts_raw]
+    except ValidationError as exc:
+        return _error_response(
+            request_id=request.request_id,
+            code="OUTPUT_VALIDATION_FAILED",
+            message="上游文档解析结果不符合冻结协议",
+            status_code=422,
+            details={"validation_errors": exc.errors(include_url=False, include_input=False)},
+            agent="data_verification",
+            stage="input_validation",
+        )
+
+    document_ids = {item.file_id for item in documents}
+    context_ids = {item.document_id for item in contexts}
+    if document_ids != context_ids:
+        return _error_response(
+            request_id=request.request_id,
+            code="INVALID_REQUEST",
+            message="documents 与 document_contexts 的文档标识不一致",
+            status_code=422,
+            details={
+                "document_ids": sorted(document_ids),
+                "context_ids": sorted(context_ids),
+            },
+            agent="data_verification",
+            stage="input_validation",
+        )
+
+    started_at = time.perf_counter()
+    try:
+        agent_result = DataValidatorAgent().run_contexts(
+            contexts,
+            documents,
+            enable_dify=request.options.enable_dify,
+        )
+        for issue in agent_result.issues:
+            enrich_issue_evidence(issue, contexts)
+    except Exception as exc:
+        return _error_response(
+            request_id=request.request_id,
+            code="INTERNAL_ERROR",
+            message="数据核验执行失败",
+            status_code=500,
+            retryable=True,
+            details={"error_type": type(exc).__name__},
+            agent="data_verification",
+            stage="data_verification",
+        )
+
+    warnings = list(dict.fromkeys(
+        warning for context in contexts for warning in context.quality.warnings
+    ))
+    return response_from_agent_result(
+        request_id=request.request_id,
+        agent_result=agent_result,
+        result={
+            **agent_result.data,
+            "project_id": request.project_id,
+            "task_id": request.task_id,
+            "verified_document_ids": sorted(document_ids),
+        },
+        warnings=warnings,
+        execution=AgentExecution(
+            duration_ms=int((time.perf_counter() - started_at) * 1000),
+            model="Dify数据核验Workflow" if (
+                request.options.enable_dify and settings.dify_data_validator_api_key
+            ) else "deterministic-calculator",
+            workflow_version=settings.data_validator_workflow_version,
             ruleset_version=settings.ruleset_version,
             execution_mode="standalone_api",
         ),
