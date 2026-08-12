@@ -71,6 +71,23 @@ X-API-Key: <AGENT_API_TOKEN>
 `result.report_url` 是报告下载地址。`check_type` 默认为 `auto`，也可以显式指定
 `full`、`compliance`、`data` 或 `anomaly`。
 
+任务进入 `waiting_review` 后，除 `review_request.issues` 外，还会返回
+`review_request.parsed_documents` 和 `review_request.agent_results`。接入方可在人工复核
+提交前展示解析概览、关键字段、证据切片、解析规划和专项智能体结论，不必等最终报告生成。
+
+## 项目证据检索
+
+每个任务会基于标准 `evidence_chunks` 建立相互隔离、可重建的临时证据索引：
+
+```http
+GET /api/agent/tasks/{task_id}/index/search?q=中标候选人&limit=8
+    &document_id=可选文件ID&content_type=text&page=23
+```
+
+`document_id`、`content_type`（`text`/`table`/`metadata`）和 `page` 均为可选过滤条件。
+返回结果包含原文、页码、章节、来源哈希、置信度和相关度。该索引用于项目内证据定位，
+不会替代 Dify 法规知识库，也不会在不同任务之间共享业务文件内容。
+
 ## 完成回调
 
 填写 `callback_url` 后，服务会在任务完成或失败时向该地址发送 `POST` 请求，请求体为完整任务对象。业务系统应返回任意 `2xx` 状态码，并根据 `task_id` 做幂等处理。

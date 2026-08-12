@@ -23,4 +23,7 @@ def test_project_index_is_task_scoped_and_searchable(tmp_path, monkeypatch):
     assert results
     assert results[0]["page"] == 1
     assert "100万元" in results[0]["content"]
+    assert service.search("T001", "技术方案", document_id="F1")[0]["page"] == 3
+    assert service.search("T001", "技术方案", document_id="missing") == []
+    assert service.search("T001", "最高投标限价", page=3) == []
     assert service.search("T002", "最高投标限价") == []

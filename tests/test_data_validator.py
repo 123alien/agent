@@ -190,6 +190,23 @@ class DataValidatorTests(unittest.TestCase):
         self.assertIn("跨文件报价不一致", issue_types)
         self.assertIn("中标候选人排序不一致", issue_types)
 
+    def test_cross_document_total_scores_are_checked(self) -> None:
+        sheet = ParsedDocument(
+            file_id="F-sheet", filename="评分汇总表.xlsx", file_type="评分表",
+            text_length=100, project_name="测试项目",
+            score_summaries=[ScoreSummary(bidder="甲公司", total_score=88.6)],
+        )
+        report = ParsedDocument(
+            file_id="F-report", filename="评标报告.docx", file_type="评标报告",
+            text_length=100, project_name="测试项目",
+            score_summaries=[ScoreSummary(bidder="甲公司", total_score=86.6)],
+        )
+        with patch.object(type(dify_client), "data_validator_enabled", new_callable=PropertyMock, return_value=False):
+            result = DataValidatorAgent().run([sheet, report])
+        issue = next(item for item in result.issues if item.issue_type == "跨文件总分不一致")
+        self.assertEqual(issue.source_location, "甲公司")
+        self.assertEqual(len(issue.evidence), 2)
+
     def test_plain_text_component_prices_are_recalculated(self) -> None:
         text = (
             "软件开发服务报价为人民币60万元。\n"

@@ -280,6 +280,7 @@ class DataValidatorAgent:
         issues.extend(self._validate_score_totals(parsed_docs))
         issues.extend(self._validate_rankings(parsed_docs))
         issues.extend(self._validate_cross_document_prices(parsed_docs))
+        issues.extend(self._validate_cross_document_scores(parsed_docs))
         issues.extend(self._validate_text_price_totals(parsed_docs, raw_texts))
         issues = self._deduplicate(issues)
         summary = f"数据核验完成，发现 {len(issues)} 项数据完整性、计算或一致性问题。"
@@ -513,6 +514,37 @@ class DataValidatorAgent:
                 description=f"{bidder}在不同资料中的报价不一致：{', '.join(str(v) for v in sorted(distinct))}。",
                 basis="同一投标人、同一标段在开标记录、投标报价及评标报告中的报价应一致。",
                 suggestion="对照开标记录表、报价表和评标报告原件，确认有效报价并统一记录。",
+                evidence=evidence[:20],
+                requires_human_review=True,
+                confidence=0.98,
+            ))
+        return issues
+
+    def _validate_cross_document_scores(self, docs: list[ParsedDocument]) -> list[Issue]:
+        """Compare the same bidder's final score across source materials."""
+        issues: list[Issue] = []
+        records: dict[tuple[str, str], list] = defaultdict(list)
+        for doc in docs:
+            for item in doc.score_summaries:
+                if item.bidder and item.total_score is not None:
+                    records[(item.bidder.strip(), item.lot.strip())].append((doc, item))
+        for (bidder, _lot), values in records.items():
+            distinct = {round(item.total_score, 4) for _, item in values}
+            if len(distinct) < 2:
+                continue
+            evidence = [
+                self._record_evidence(doc, item.source, f"{bidder}总分：{item.total_score}")
+                for doc, item in values
+            ]
+            issues.append(Issue(
+                agent=self.name,
+                risk_level="高",
+                issue_type="跨文件总分不一致",
+                source_file="、".join(dict.fromkeys(doc.filename for doc, _ in values)),
+                source_location=bidder,
+                description=f"{bidder}在不同评审资料中的总分不一致：{', '.join(str(v) for v in sorted(distinct))}。",
+                basis="同一投标人、同一标段在评分汇总表、评标结果汇总及评标报告中的最终得分应保持一致。",
+                suggestion="对照专家评分明细、评分汇总表和评标报告，复算并统一最终得分。",
                 evidence=evidence[:20],
                 requires_human_review=True,
                 confidence=0.98,

@@ -468,13 +468,27 @@ def get_task(task_id: str) -> TaskRecord:
 
 
 @router.get("/tasks/{task_id}/index/search")
-def search_task_index(task_id: str, q: str, limit: int = 8) -> dict:
+def search_task_index(
+    task_id: str,
+    q: str,
+    limit: int = 8,
+    document_id: str = "",
+    content_type: str = "",
+    page: int | None = None,
+) -> dict:
     if task_store.get(task_id) is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return {
         "task_id": task_id,
         "query": q,
-        "results": project_index_service.search(task_id, q, limit),
+        "filters": {
+            "document_id": document_id,
+            "content_type": content_type,
+            "page": page,
+        },
+        "results": project_index_service.search(
+            task_id, q, limit, document_id, content_type, page
+        ),
     }
 
 
