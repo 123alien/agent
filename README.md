@@ -4,6 +4,9 @@
 
 项目背景、架构决策、当前进度及 Dify 后续接入步骤见 [项目交接说明](docs/project-handoff.md)。
 
+新电脑部署或交付业务系统时，优先阅读 [新电脑快速接入清单](docs/quickstart-handoff.md)。
+五个独立智能体的冻结协议见 [Agent Contract v1](docs/agent-contract-v1.md)。
+
 跨电脑部署、Dify配置、模型替换、业务系统调用和上线验收请直接查看
 [跨电脑部署与系统接入指南](docs/deployment-guide.md)。
 
