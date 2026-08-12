@@ -191,6 +191,7 @@ def build_task(
     files: list[UploadedFileInfo],
     callback_url: str = "",
     system_record: dict | None = None,
+    relationship_data: dict | None = None,
     output_type: str = "综合智能核验报告",
     template_type: str = "标准审查报告",
 ) -> TaskRecord:
@@ -204,6 +205,7 @@ def build_task(
         files=files,
         callback_url=callback_url,
         system_record=system_record or {},
+        relationship_data=relationship_data or {},
         output_type=output_type,
         template_type=template_type,
         callback_status="pending" if callback_url else "not_configured",
@@ -296,6 +298,7 @@ async def create_task(
     check_type: Annotated[str, Form()] = "auto",
     callback_url: Annotated[str, Form()] = "",
     system_record: Annotated[str, Form()] = "{}",
+    relationship_data: Annotated[str, Form()] = "{}",
     output_type: Annotated[str, Form()] = "综合智能核验报告",
     template_type: Annotated[str, Form()] = "标准审查报告",
 ) -> TaskRecord:
@@ -336,6 +339,13 @@ async def create_task(
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="system_record 必须是 JSON 对象") from exc
 
+    try:
+        parsed_relationship_data = json.loads(relationship_data or "{}")
+        if not isinstance(parsed_relationship_data, dict):
+            raise ValueError
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="relationship_data 必须是 JSON 对象") from exc
+
     task = build_task(
         task_id,
         project_id,
@@ -344,6 +354,7 @@ async def create_task(
         uploaded_files,
         callback_url,
         parsed_system_record,
+        parsed_relationship_data,
         output_type,
         template_type,
     )
@@ -384,6 +395,7 @@ async def create_task_from_urls(
         uploaded_files,
         request.callback_url,
         request.system_record,
+        request.relationship_data,
         request.output_type,
         request.template_type,
     )

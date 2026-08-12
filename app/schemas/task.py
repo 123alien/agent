@@ -30,12 +30,14 @@ class UploadedFileInfo(BaseModel):
     file_type: str = "未知文件"
     saved_path: str
     source_url: str = ""
+    document_role: str = "other"
 
 
 class RemoteFileInput(BaseModel):
     url: str
     filename: str = ""
     file_type: str = ""
+    document_role: str = ""
 
 
 class CreateUrlTaskRequest(BaseModel):
@@ -45,6 +47,7 @@ class CreateUrlTaskRequest(BaseModel):
     files: list[RemoteFileInput]
     callback_url: str = ""
     system_record: dict = Field(default_factory=dict)
+    relationship_data: dict = Field(default_factory=dict)
     output_type: ReportOutputType = "综合智能核验报告"
     template_type: ReportTemplateType = "标准审查报告"
 
@@ -233,6 +236,7 @@ class ParsedDocument(BaseModel):
     filename: str
     file_type: str
     document_subtype: str = "其他资料"
+    document_role: str = "other"
     text_length: int
     project_name: str = ""
     tenderer: str = ""
@@ -281,6 +285,7 @@ class TaskResult(BaseModel):
     issues: list[Issue] = Field(default_factory=list)
     report_url: str = ""
     report_files: dict[str, str] = Field(default_factory=dict)
+    material_inventory: dict = Field(default_factory=dict)
 
 
 class TaskRecord(BaseModel):
@@ -297,6 +302,7 @@ class TaskRecord(BaseModel):
     review_progress: dict = Field(default_factory=dict)
     callback_url: str = ""
     system_record: dict = Field(default_factory=dict)
+    relationship_data: dict = Field(default_factory=dict)
     output_type: ReportOutputType = "综合智能核验报告"
     template_type: ReportTemplateType = "标准审查报告"
     callback_status: Literal["not_configured", "pending", "sent", "failed"] = (

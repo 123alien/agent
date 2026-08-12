@@ -40,6 +40,7 @@ from app.schemas.task import (
 from app.services.report_service import create_reports
 from app.services.document_context import build_document_context
 from app.services.evidence_locator import enrich_issue_evidence
+from app.services.material_inventory import build_material_inventory
 
 
 AgentNode = Literal[
@@ -336,6 +337,7 @@ class SupervisorAgent:
             state["document_contexts"],
             state["parsed_docs"],
             state["agent_results"],
+            relationship_data=state["task"].relationship_data,
         )
         self._enrich_result_evidence(result, state["document_contexts"])
         return {
@@ -526,6 +528,9 @@ class SupervisorAgent:
             parsed_documents=state["parsed_docs"],
             agent_results=[*state["agent_results"], report_result],
             issues=state["issues"],
+            material_inventory=build_material_inventory(
+                state["parsed_docs"], task.check_type
+            ),
         )
         create_reports(task, result)
         result.report_url = f"/api/agent/tasks/{task.task_id}/report"

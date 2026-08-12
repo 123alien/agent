@@ -81,6 +81,47 @@ LLM_MODEL=qwen2.5:14b
 
 推荐生产方式：调用 `POST /api/agent/tasks/from-urls`，由现有 LangGraph 总流程调度五个智能体、人工复核与回调。
 
+完整任务请求示例：
+
+```json
+{
+  "project_id": "XXCG-2026-0811",
+  "project_name": "XX市信息化平台升级建设项目",
+  "check_type": "full",
+  "files": [
+    {
+      "url": "https://business.example.com/files/procurement.pdf",
+      "filename": "01_采购文件.pdf",
+      "document_role": "procurement_document"
+    },
+    {
+      "url": "https://business.example.com/files/bid-a.pdf",
+      "filename": "A公司投标文件.pdf",
+      "document_role": "bid_response"
+    }
+  ],
+  "system_record": {
+    "project_number": "XXCG-2026-0811",
+    "project_name": "XX市信息化平台升级建设项目"
+  },
+  "relationship_data": {
+    "contacts": [],
+    "network_features": [],
+    "file_metadata": [],
+    "bid_records": []
+  },
+  "output_type": "综合智能核验报告",
+  "template_type": "标准审查报告"
+}
+```
+
+`document_role` 可省略，由系统自动识别；生产系统已掌握资料类型时建议明确传入。支持值：
+`procurement_document`、`bid_response`、`opening_record`、`evaluation_standard`、
+`expert_score`、`evaluation_summary`、`evaluation_report`、`transaction_metadata`、`other`。
+
+`relationship_data` 是跨供应商异常分析的外部事实输入。没有关系数据时传 `{}`；不要把法规文档或普通正文放入该字段。
+任务完成后，`result.material_inventory` 返回资料分类及完整性检查结果。`not_identified` 表示当前材料中未识别到，需要人工确认，并不等同于确定缺失。
+
 独立服务方式：依次调用：
 
 1. `POST /api/v1/agents/document-parser`

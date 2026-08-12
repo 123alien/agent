@@ -26,6 +26,7 @@ from app.schemas.task import (
     UploadedFileInfo,
 )
 from app.services.file_parser import ParsedFileContent, parse_file
+from app.services.material_inventory import classify_document_role
 from app.services.document_visual_service import analyze_document_visuals
 from app.services.document_semantic_enhancer import (
     DifyWorkflowError,
@@ -907,6 +908,13 @@ class DocumentParserAgent:
                     filename=file_info.filename,
                     file_type=file_info.file_type,
                     document_subtype=document_subtype,
+                    document_role=(
+                        file_info.document_role
+                        if file_info.document_role != "other"
+                        else classify_document_role(
+                            file_info.filename, file_info.file_type, document_subtype
+                        )
+                    ),
                     text_length=len(text),
                     project_name=fields.get("project_name", ExtractedField()).value or guess_project_name(text, project_name),
                     tenderer=fields.get("tenderer", ExtractedField()).value,

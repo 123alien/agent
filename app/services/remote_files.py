@@ -65,6 +65,7 @@ async def download_remote_file(
         file_id=file_id,
         filename=display_name,
         file_type=item.file_type or infer_file_type(display_name),
+        document_role=item.document_role or "other",
         saved_path=str(saved_path),
         source_url=item.url,
     )
