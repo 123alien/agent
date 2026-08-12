@@ -39,11 +39,12 @@ class ComplianceCheckerAgent:
         contexts: list[DocumentContext],
         parsed_docs: list[ParsedDocument],
         system_record: dict | None = None,
+        enable_dify: bool = True,
     ) -> AgentResult:
         """Run from the shared v1 contract while preserving legacy rule helpers."""
         raw_texts = {context.document_id: context.raw_text for context in contexts}
         file_hashes = {context.document_id: context.file_hash for context in contexts}
-        if dify_client.enabled:
+        if enable_dify and dify_client.enabled:
             result = self._run_with_dify(parsed_docs, raw_texts, file_hashes)
         else:
             result = self._run_locally(parsed_docs, raw_texts)

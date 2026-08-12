@@ -6,7 +6,8 @@ from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.main import app
-from app.schemas.task import AgentResult, ParsedDocument
+from app.schemas.document_context import DocumentContext
+from app.schemas.task import AgentResult, Issue, ParsedDocument
 
 
 class StandaloneDocumentParserApiTests(unittest.TestCase):
@@ -43,6 +44,7 @@ class StandaloneDocumentParserApiTests(unittest.TestCase):
         self.assertEqual(payload["agent"], "document_parser")
         self.assertEqual(payload["request_id"], "REQ-DOC-001")
         self.assertEqual(payload["result"]["documents"][0]["filename"], "采购文件.txt")
+        self.assertEqual(payload["result"]["document_contexts"][0]["document_id"], "F-1")
         self.assertEqual(payload["execution"]["execution_mode"], "standalone_api")
         self.assertTrue(mock_run.call_args.kwargs["enable_semantic_enhancement"])
 
@@ -63,6 +65,59 @@ class StandaloneDocumentParserApiTests(unittest.TestCase):
             "/api/v1/agents/document-parser"
         ]["post"]
         self.assertIn("multipart/form-data", operation["requestBody"]["content"])
+
+    @patch("app.api.agents.ComplianceCheckerAgent.run_contexts")
+    def test_compliance_review_consumes_parser_contract(self, mock_run) -> None:
+        document = ParsedDocument(
+            file_id="F-1", filename="采购文件.txt", file_type="招标文件",
+            text_length=20, project_name="某市信息化平台项目",
+        )
+        context = DocumentContext(
+            document_id="F-1", file_name="采购文件.txt",
+            file_hash="a" * 64, document_type="招标文件",
+            raw_text="投标人注册地址必须位于本市。",
+        )
+        mock_run.return_value = AgentResult(
+            agent="合规审查智能体",
+            summary="发现 1 项待复核问题。",
+            issues=[Issue(
+                issue_id="C-1", agent="合规审查智能体", risk_level="高",
+                issue_type="地域限制", description="注册地址限制需审查",
+                evidence=["投标人注册地址必须位于本市。"],
+                requires_human_review=True,
+            )],
+        )
+        payload = {
+            "contract_version": "1.0.0",
+            "request_id": "REQ-COM-001",
+            "project_id": "P-001",
+            "input": {
+                "documents": [document.model_dump(mode="json")],
+                "document_contexts": [context.model_dump(mode="json")],
+                "system_record": {},
+            },
+            "options": {"enable_dify": False, "enable_human_review": True, "trace_enabled": True},
+        }
+        response = self.client.post(
+            "/api/v1/agents/compliance-review", json=payload, headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertEqual(result["agent"], "compliance_review")
+        self.assertEqual(result["findings"][0]["final_status"], "human_review")
+        self.assertEqual(result["findings"][0]["evidence"][0]["quote"], "投标人注册地址必须位于本市。")
+        self.assertFalse(mock_run.call_args.kwargs["enable_dify"])
+
+    def test_compliance_review_rejects_missing_context(self) -> None:
+        payload = {
+            "request_id": "REQ-COM-002", "project_id": "P-001",
+            "input": {"documents": [{}]},
+        }
+        response = self.client.post(
+            "/api/v1/agents/compliance-review", json=payload, headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["errors"][0]["code"], "INVALID_REQUEST")
 
 
 if __name__ == "__main__":

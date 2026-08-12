@@ -54,8 +54,22 @@
 ```
 
 接口返回统一 `AgentResponse`。结构化解析结果位于 `result.documents`，
-可追溯问题位于 `findings`。`enable_dify=false` 时仅执行确定性解析、OCR、
+共享事实对象位于 `result.document_contexts`，可追溯问题位于 `findings`。
+`enable_dify=false` 时仅执行确定性解析、OCR、
 版面与视觉规则，不调用 Dify 文档语义增强工作流。
+
+### 2.2 独立合规审查接口
+
+`POST /api/v1/agents/compliance-review` 使用 `application/json`，请求体为
+`AgentRequest` v1。其中 `input` 必须包含：
+
+- `documents`：文档解析接口返回的 `result.documents`。
+- `document_contexts`：文档解析接口返回的 `result.document_contexts`。
+- `system_record`：可选的业务系统基准数据对象；未提供时按空对象处理。
+
+接口校验两组文档标识完全一致，随后执行评标报告章节完整性、基础信息一致性、
+废标依据回查、风险条款审查与证据定位。它不会重新读取或解析原始文件。
+`enable_dify=false` 时仅执行确定性合规规则；启用时复用已配置的 Dify 合规工作流与 RAG。
 
 ## 3. DocumentContext
 
