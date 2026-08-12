@@ -29,17 +29,20 @@ class AnomalyAnalyzerAgent:
         contexts: list[DocumentContext],
         parsed_docs: list[ParsedDocument],
         agent_results: list[AgentResult] | None = None,
+        relationship_data: dict | None = None,
+        enable_dify: bool = True,
     ) -> AgentResult:
         raw_texts = {context.document_id: context.raw_text for context in contexts}
         agent_results = agent_results or []
         local_result = self._run_locally(parsed_docs, raw_texts, contexts)
-        if dify_client.anomaly_analyzer_enabled:
+        if enable_dify and dify_client.anomaly_analyzer_enabled:
             semantic_result = self._run_with_dify(
                 parsed_docs,
                 raw_texts,
                 agent_results,
                 contexts,
                 local_result,
+                relationship_data,
             )
             result = self._merge_results(local_result, semantic_result)
         else:
@@ -104,6 +107,7 @@ class AnomalyAnalyzerAgent:
         agent_results: list[AgentResult],
         contexts: list[DocumentContext] | None = None,
         deterministic_result: AgentResult | None = None,
+        relationship_data: dict | None = None,
     ) -> AgentResult:
         parsed_payload = self._parsed_documents_payload(parsed_docs)
         compliance_payload = self._agent_payload(agent_results, "合规审查智能体")
@@ -113,6 +117,10 @@ class AnomalyAnalyzerAgent:
             if contexts is not None
             else self._relationship_payload(parsed_docs, raw_texts)
         )
+        if relationship_data:
+            relationship_payload = self._merge_relationship_data(
+                relationship_payload, relationship_data
+            )
         inputs = {
             "parsed_documents": json.dumps(parsed_payload, ensure_ascii=False),
             "compliance_results": json.dumps(compliance_payload, ensure_ascii=False),
@@ -225,6 +233,18 @@ class AnomalyAnalyzerAgent:
             "network_features": [],
             "bid_records": bid_records,
         }
+
+    @staticmethod
+    def _merge_relationship_data(base: dict, external: dict) -> dict:
+        """Merge caller-provided relationship signals with derived document signals."""
+        merged = dict(base)
+        for key, value in external.items():
+            if isinstance(value, list):
+                current = merged.get(key, [])
+                merged[key] = [*current, *value] if isinstance(current, list) else value
+            elif value not in (None, ""):
+                merged[key] = value
+        return merged
 
     @staticmethod
     def _relationship_context_payload(

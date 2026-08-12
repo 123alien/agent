@@ -193,6 +193,16 @@
 输出：跨文件、跨主体、多信号异常 `AgentIssue[]`。  
 要求：不得把单一弱信号直接认定为串通投标。
 
+独立服务接口：`POST /api/v1/agents/anomaly-analysis`。
+
+- `input.documents`：文档解析接口返回的 `result.documents`。
+- `input.document_contexts`：文档解析接口返回的 `result.document_contexts`。
+- `input.upstream_responses`：可选，合规审查和数据核验接口的完整 `AgentResponse[]`，可直接串联，无需转换内部模型。
+- `input.relationship_data`：必填对象；可包含主体、联系人、IP、MAC、机器码、文件元数据、报价记录等，暂时没有外部关系数据时传 `{}`。
+- `options.enable_dify=false`：只运行后端确定性异常引擎；为 `true` 时在已配置异常分析 Dify Key 的情况下启用语义增强。
+
+返回值遵循统一三态协议。异常线索默认进入 `human_review`，接口不得把报价规律、IP 重合或文本相似等单一信号直接表述为已经构成串通投标。
+
 ### 5.5 报告生成智能体
 
 输入：全部 `AgentResult[]` 和人工复核结果。  

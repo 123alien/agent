@@ -181,6 +181,69 @@ class StandaloneDocumentParserApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["errors"][0]["code"], "INVALID_REQUEST")
 
+    @patch("app.api.agents.AnomalyAnalyzerAgent.run_contexts")
+    def test_anomaly_analysis_accepts_upstream_responses(self, mock_run) -> None:
+        document = ParsedDocument(
+            file_id="F-1", filename="响应文件.pdf", file_type="投标文件",
+            document_subtype="响应文件", text_length=20,
+        )
+        context = DocumentContext(
+            document_id="F-1", file_name="响应文件.pdf", file_hash="d" * 64,
+            document_type="投标文件", raw_text="联系电话13800001111",
+        )
+        mock_run.return_value = AgentResult(
+            agent="异常分析智能体", summary="发现 1 项异常线索。",
+            issues=[Issue(
+                issue_id="A-001", agent="异常分析智能体", risk_level="高",
+                issue_type="多信号组合异常", description="多个独立信号重合。",
+                evidence=["13800001111"], requires_human_review=True,
+            )],
+        )
+        upstream = {
+            "contract_version": "1.0.0", "request_id": "REQ-UP-1",
+            "agent": "compliance_review", "status": "completed", "summary": "完成",
+            "result": {}, "findings": [], "warnings": [], "errors": [], "execution": {},
+        }
+        payload = {
+            "request_id": "REQ-ANOMALY-001", "project_id": "P-001",
+            "input": {
+                "documents": [document.model_dump(mode="json")],
+                "document_contexts": [context.model_dump(mode="json")],
+                "upstream_responses": [upstream],
+                "relationship_data": {"network_features": [{"ip": "203.0.113.10"}]},
+            },
+            "options": {"enable_dify": False},
+        }
+        response = self.client.post(
+            "/api/v1/agents/anomaly-analysis", json=payload, headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["agent"], "anomaly_analysis")
+        self.assertEqual(body["findings"][0]["final_status"], "human_review")
+        args, kwargs = mock_run.call_args
+        self.assertEqual(args[2][0].agent, "合规审查智能体")
+        self.assertFalse(kwargs["enable_dify"])
+        self.assertIn("network_features", kwargs["relationship_data"])
+
+    def test_anomaly_analysis_requires_relationship_data(self) -> None:
+        document = ParsedDocument(
+            file_id="F-1", filename="响应文件.pdf", file_type="投标文件", text_length=10,
+        )
+        context = DocumentContext(
+            document_id="F-1", file_name="响应文件.pdf", file_hash="e" * 64,
+            document_type="投标文件", raw_text="响应文件",
+        )
+        response = self.client.post("/api/v1/agents/anomaly-analysis", json={
+            "request_id": "REQ-ANOMALY-002", "project_id": "P-001",
+            "input": {
+                "documents": [document.model_dump(mode="json")],
+                "document_contexts": [context.model_dump(mode="json")],
+            },
+        }, headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("relationship_data", response.json()["errors"][0]["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

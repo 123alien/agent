@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from app.agents.document_parser import DocumentParserAgent
 from app.agents.compliance_checker import ComplianceCheckerAgent
 from app.agents.data_validator import DataValidatorAgent
+from app.agents.anomaly_analyzer import AnomalyAnalyzerAgent
 from app.api.file_helpers import infer_file_type, safe_storage_name
 from app.core.config import ensure_data_dirs, settings
 from app.schemas.agent_protocol import (
@@ -22,12 +23,57 @@ from app.schemas.agent_protocol import (
     response_from_agent_result,
 )
 from app.schemas.document_context import DocumentContext
-from app.schemas.task import ParsedDocument, UploadedFileInfo
+from app.schemas.task import AgentResult, EvidenceRef, Issue, ParsedDocument, UploadedFileInfo
 from app.services.document_context import build_document_context
 from app.services.evidence_locator import enrich_issue_evidence
 
 
 router = APIRouter()
+
+
+_UPSTREAM_AGENT_NAMES = {
+    "compliance_review": "合规审查智能体",
+    "data_verification": "数据核验智能体",
+}
+
+
+def _upstream_agent_result(response: AgentResponse) -> AgentResult:
+    issues: list[Issue] = []
+    for finding in response.findings:
+        refs = [
+            EvidenceRef(
+                document_id=item.document_id,
+                page=item.page,
+                section=item.section,
+                quote=item.quote,
+                source_type="derived" if item.source_type == "visual" else item.source_type,
+                derived_from=item.derived_from,
+            )
+            for item in finding.evidence
+        ]
+        issues.append(Issue(
+            issue_id=finding.finding_id,
+            agent=_UPSTREAM_AGENT_NAMES[response.agent],
+            risk_level=finding.risk_level,
+            issue_type=finding.finding_type,
+            source_file=next((item.file_name for item in finding.evidence if item.file_name), ""),
+            source_location=next((item.section for item in finding.evidence if item.section), ""),
+            description=finding.description,
+            basis=finding.basis,
+            suggestion=finding.suggestion,
+            evidence=[item.quote for item in finding.evidence],
+            evidence_refs=refs,
+            requires_human_review=finding.requires_human_review,
+            final_status=finding.final_status,
+            detection_status=finding.detection_status,
+            confidence=finding.confidence,
+        ))
+    return AgentResult(
+        agent=_UPSTREAM_AGENT_NAMES[response.agent],
+        summary=response.summary,
+        issues=issues,
+        data=response.result,
+    )
 
 
 def _error_response(
@@ -394,6 +440,93 @@ def run_data_verification(
                 request.options.enable_dify and settings.dify_data_validator_api_key
             ) else "deterministic-calculator",
             workflow_version=settings.data_validator_workflow_version,
+            ruleset_version=settings.ruleset_version,
+            execution_mode="standalone_api",
+        ),
+    )
+
+
+@router.post(
+    "/anomaly-analysis",
+    response_model=AgentResponse,
+    summary="Run the standalone anomaly analysis agent",
+)
+def run_anomaly_analysis(
+    request: Annotated[AgentRequest, Body()],
+) -> AgentResponse | JSONResponse:
+    documents_raw = request.input.get("documents")
+    contexts_raw = request.input.get("document_contexts")
+    upstream_raw = request.input.get("upstream_responses", [])
+    relationship_data = request.input.get("relationship_data")
+    if not isinstance(documents_raw, list) or not documents_raw:
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="input.documents 必须是非空的文档解析结果数组", status_code=422,
+            agent="anomaly_analysis", stage="anomaly_analysis")
+    if not isinstance(contexts_raw, list) or not contexts_raw:
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="input.document_contexts 必须是非空的 DocumentContext v1 数组", status_code=422,
+            agent="anomaly_analysis", stage="anomaly_analysis")
+    if not isinstance(relationship_data, dict):
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="input.relationship_data 为必填对象；暂无外部关系数据时请传 {}", status_code=422,
+            agent="anomaly_analysis", stage="input_validation")
+    if not isinstance(upstream_raw, list):
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="input.upstream_responses 必须是数组", status_code=422,
+            agent="anomaly_analysis", stage="input_validation")
+    try:
+        documents = [ParsedDocument.model_validate(item) for item in documents_raw]
+        contexts = [DocumentContext.model_validate(item) for item in contexts_raw]
+        upstream = [AgentResponse.model_validate(item) for item in upstream_raw]
+    except ValidationError as exc:
+        return _error_response(request_id=request.request_id, code="OUTPUT_VALIDATION_FAILED",
+            message="上游智能体结果不符合冻结协议", status_code=422,
+            details={"validation_errors": exc.errors(include_url=False, include_input=False)},
+            agent="anomaly_analysis", stage="input_validation")
+    unsupported = sorted({item.agent for item in upstream} - set(_UPSTREAM_AGENT_NAMES))
+    if unsupported:
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="upstream_responses 仅接受合规审查和数据核验响应", status_code=422,
+            details={"unsupported_agents": unsupported}, agent="anomaly_analysis",
+            stage="input_validation")
+    document_ids = {item.file_id for item in documents}
+    context_ids = {item.document_id for item in contexts}
+    if document_ids != context_ids:
+        return _error_response(request_id=request.request_id, code="INVALID_REQUEST",
+            message="documents 与 document_contexts 的文档标识不一致", status_code=422,
+            details={"document_ids": sorted(document_ids), "context_ids": sorted(context_ids)},
+            agent="anomaly_analysis", stage="input_validation")
+
+    started_at = time.perf_counter()
+    try:
+        agent_result = AnomalyAnalyzerAgent().run_contexts(
+            contexts, documents, [_upstream_agent_result(item) for item in upstream],
+            relationship_data=relationship_data, enable_dify=request.options.enable_dify,
+        )
+        for issue in agent_result.issues:
+            enrich_issue_evidence(issue, contexts)
+    except Exception as exc:
+        return _error_response(request_id=request.request_id, code="INTERNAL_ERROR",
+            message="异常分析执行失败", status_code=500, retryable=True,
+            details={"error_type": type(exc).__name__}, agent="anomaly_analysis",
+            stage="anomaly_analysis")
+    warnings = list(dict.fromkeys(
+        warning for context in contexts for warning in context.quality.warnings
+    ))
+    return response_from_agent_result(
+        request_id=request.request_id,
+        agent_result=agent_result,
+        result={**agent_result.data, "project_id": request.project_id,
+            "task_id": request.task_id, "analyzed_document_ids": sorted(document_ids),
+            "upstream_agents": [item.agent for item in upstream],
+            "relationship_data_provided": bool(relationship_data)},
+        warnings=warnings,
+        execution=AgentExecution(
+            duration_ms=int((time.perf_counter() - started_at) * 1000),
+            model="Dify异常分析Workflow" if (
+                request.options.enable_dify and settings.dify_anomaly_analyzer_api_key
+            ) else "deterministic-anomaly-engine",
+            workflow_version=settings.anomaly_analyzer_workflow_version,
             ruleset_version=settings.ruleset_version,
             execution_mode="standalone_api",
         ),
