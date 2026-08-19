@@ -29,6 +29,7 @@ from app.services.task_store import task_store
 from app.services.time_utils import now_iso
 from app.services.deliverable_service import create_deliverable_xlsx
 from app.services.project_index import project_index_service
+from app.services.evaluation_rule_service import public_rule_catalog
 
 router = APIRouter()
 
@@ -40,6 +41,13 @@ def get_capabilities() -> dict:
         "api_version": API_CONTRACT_VERSION,
         "agent_contract_version": AGENT_CONTRACT_VERSION,
         "architecture": "FastAPI + LangGraph + Dify/RAG + deterministic tools",
+        "review_rules": {
+            "version": public_rule_catalog()["version"],
+            "groups": 3,
+            "total": public_rule_catalog()["total_rules"],
+            "active": public_rule_catalog()["active_rules"],
+            "endpoint": "/api/agent/review-rules",
+        },
         "agents": [
             {"id": "document", "name": "文档解析智能体"},
             {"id": "compliance", "name": "合规审查智能体"},
@@ -90,6 +98,12 @@ def get_capabilities() -> dict:
             "max_attempts": settings.callback_max_attempts,
         },
     }
+
+
+@router.get("/review-rules")
+def get_review_rules() -> dict:
+    """Return the frozen three-part evaluation rule catalog."""
+    return public_rule_catalog()
 
 
 @router.post("/contracts/generate", response_model=ContractGenerationResult)
@@ -220,7 +234,7 @@ def build_task(
             "api_version": API_CONTRACT_VERSION,
             "agent_contract_version": AGENT_CONTRACT_VERSION,
             "model": settings.llm_model,
-            "ruleset_version": settings.ruleset_version,
+            "ruleset_version": public_rule_catalog()["version"],
             "workflows": {
                 "compliance": settings.compliance_workflow_version,
                 "data_validation": settings.data_validator_workflow_version,

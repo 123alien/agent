@@ -210,3 +210,22 @@ DIFY_REPORT_GENERATOR_API_KEY=app-报告生成Key
 
 不要把单一 IP、MAC、报价规律或文本相似度直接写成违法事实。系统定位始终是：
 发现线索、给出证据、评估风险、进入人工复核并保留审计记录。
+
+## 8. 三部分评审规则（2026-08-12 版）
+
+系统已将评审规则按三部分统一接入结果复核节点：
+
+1. 项目基本信息、评标结果与推荐、报告签章与附件；
+2. 招标公告与发售情况、开标情况、评标委员会组成；
+3. 资格审查、符合性审查、详细评审与评审结果汇总。
+
+规则目录共 41 条，其中 39 条启用、2 条重复规则停用并复用合并后的规则结果。每次任务在五个智能体执行后，结果复核智能体生成 `three_part_rule_execution` 执行矩阵。规则状态包括：`passed`、`confirmed_issue`、`human_review`、`insufficient_data` 和 `disabled`。其中 `insufficient_data` 表示资料不足未执行，绝不等同于通过。
+
+从规则版本 `evaluation-review-2026.08.12-v2` 起，`passed` 必须由专用执行器完成字段比对、排序复算、评分复算或视觉状态检查后产生，并同时返回 `execution_evidence` 与 `calculation`。仅识别到同类文档、但缺少可比字段、基准值或计算明细时，必须返回 `insufficient_data`，并在 `missing_inputs` 中列出缺失资料。`not_applicable` 仅用于采购方式、核验类型或明确触发条件排除的规则。
+
+- 规则实现：`app/services/evaluation_rule_service.py`
+- 规则目录接口：`GET /api/agent/review-rules`
+- 前端查看位置：任务详情 → “三部分规则”
+- 自动化测试：`tests/test_evaluation_rule_service.py`
+
+LangGraph 主链路已经按场景流程图调整为：文档解析 → 规则获取与采购方式匹配 → UC-04 文本内容核对 / UC-05 分值复算与价格预警 / UC-06 客观评分一致性 / UC-07 主观评分偏离监测 → 结果复核 → 人工确认（必要时）→ 报告生成。每个任务会保存采购方式来源、命中规则编号、UC 执行计划和规则版本，供前端执行轨迹与审计追溯使用。

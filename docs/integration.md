@@ -149,3 +149,12 @@ X-API-Key: <AGENT_API_TOKEN>
 - `CORS_ALLOWED_ORIGINS`：允许访问服务的前端来源，多个值用英文逗号分隔，例如 `https://review.example.com`。
 
 正式部署建议同时配置主机白名单、`AGENT_API_TOKEN` 和精确的 CORS 来源，并由网关增加 HTTPS、限流和访问日志。`/health` 不要求令牌，便于容器和负载均衡器执行健康检查。
+### 查询三部分评审规则
+
+```http
+GET /api/agent/review-rules
+```
+
+该接口返回三部分、41 条规则的稳定编号、责任智能体、执行方式和启停状态。任务执行后的实际规则矩阵位于“结果复核智能体”的 `data.three_part_rule_execution` 字段。`insufficient_data` 只表示本次资料不足，调用方不得将其显示为通过。
+
+规则结果中的 `required_inputs`、`missing_inputs`、`execution_evidence` 和 `calculation` 分别表示执行所需输入、实际缺失输入、采用的原始证据以及可复现计算口径。集成系统应展示这些字段，不应仅展示状态名称。

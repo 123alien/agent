@@ -14,6 +14,7 @@ from app.agents.compliance_checker import ComplianceCheckerAgent
 from app.agents.data_validator import DataValidatorAgent
 from app.agents.document_parser import DocumentParserAgent
 from app.services.project_index import project_index_service
+from app.services.evaluation_rule_service import evaluation_rule_service
 from app.agents.quality_reviewer import QualityReviewerAgent
 from app.agents.report_generator import ReportGeneratorAgent
 from app.agents.routing_agent import RoutingAgent
@@ -75,6 +76,7 @@ class AgentState(TypedDict):
     human_review_completed: bool
     human_review: dict
     routing: dict
+    rule_plan: dict
     result: TaskResult | None
 
 
@@ -132,6 +134,7 @@ class SupervisorAgent:
     def _build_graph(self):
         builder = StateGraph(AgentState)
         builder.add_node("document_parser", self._parse_documents)
+        builder.add_node("rule_planner", self._match_review_rules)
         builder.add_node("supervisor", self._plan_or_continue)
         builder.add_node("compliance", self._run_compliance)
         builder.add_node("data", self._run_data_validation)
@@ -141,7 +144,8 @@ class SupervisorAgent:
         builder.add_node("report", self._generate_report)
 
         builder.add_edge(START, "document_parser")
-        builder.add_edge("document_parser", "supervisor")
+        builder.add_edge("document_parser", "rule_planner")
+        builder.add_edge("rule_planner", "supervisor")
         builder.add_conditional_edges(
             "supervisor",
             self._route_next,
@@ -185,6 +189,7 @@ class SupervisorAgent:
                     "human_review_completed": False,
                     "human_review": {},
                     "routing": {},
+                    "rule_plan": {},
                     "result": None,
                 },
                 config=self._config(task.task_id),
@@ -342,13 +347,16 @@ class SupervisorAgent:
             "anomaly": ["anomaly"],
             "full": ["compliance", "data", "anomaly"],
         }
-        if check_type == "auto":
-            decision = self.routing_agent.plan(state["parsed_docs"], state["raw_texts"])
-            plan = [node for node in decision.selected_agents if node in plans["full"]]
+        if state.get("rule_plan"):
+            plan = [node for node in state["rule_plan"].get("selected_agents", []) if node in plans["full"]]
             routing = {
-                "mode": "auto",
+                "mode": "rule_driven",
                 "selected_agents": plan,
-                "reasons": decision.reasons,
+                "procurement_method": state["rule_plan"].get("procurement_method", "未识别"),
+                "ruleset_version": state["rule_plan"].get("ruleset_version", ""),
+                "matched_rule_count": state["rule_plan"].get("matched_rule_count", 0),
+                "phases": state["rule_plan"].get("phases", []),
+                "reasons": [state["rule_plan"].get("decision", "按规则计划执行")],
             }
         else:
             effective_type = check_type if check_type in plans else "full"
@@ -487,6 +495,14 @@ class SupervisorAgent:
             data={
                 "findings": review.findings,
                 "retry_agent": review.retry_agent if should_retry else "",
+                "three_part_rule_execution": evaluation_rule_service.evaluate(
+                    contexts=state["document_contexts"],
+                    docs=state["parsed_docs"],
+                    agent_results=state["agent_results"],
+                    issues=review.valid_issues,
+                    execution_plan=state.get("rule_plan"),
+                    system_record=state["task"].system_record,
+                ),
             },
         )
         agent_results = [*state["agent_results"], review_result]
@@ -691,6 +707,40 @@ class SupervisorAgent:
             "agent_results": [*state["agent_results"], report_result],
             "execution_trace": [*state["execution_trace"], "report"],
             "result": result,
+        }
+
+    def _match_review_rules(self, state: AgentState) -> dict:
+        task = state["task"]
+        self._emit(
+            agent="规则匹配节点", node="rule_planner", status="running",
+            goal="Fetch核验规则并按采购方式、核验类型和资料条件生成执行计划",
+            tools=["三部分评审规则库", "采购方式识别", "条件规则匹配"],
+        )
+        plan = evaluation_rule_service.build_execution_plan(
+            contexts=state["document_contexts"],
+            docs=state["parsed_docs"],
+            system_record=task.system_record,
+            check_type=task.check_type,
+        )
+        result = AgentResult(
+            agent="规则匹配节点",
+            summary=(
+                f"识别采购方式为{plan['procurement_method']}，"
+                f"三部分规则适用 {plan['matched_rule_count']} 条，"
+                f"当前资料可尝试执行 {plan['executable_rule_count']} 条。"
+            ),
+            data=plan,
+        )
+        self._emit(
+            agent="规则匹配节点", node="rule_planner", status="completed",
+            goal="形成UC-04至UC-07执行计划",
+            finding=result.summary,
+            decision=" → ".join(plan["selected_agents"]) or "进入结果复核",
+        )
+        return {
+            "rule_plan": plan,
+            "agent_results": [*state["agent_results"], result],
+            "execution_trace": [*state["execution_trace"], "rule_planner"],
         }
 
 
