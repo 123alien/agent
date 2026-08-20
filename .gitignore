@@ -12,6 +12,10 @@ data/project_indexes/
 data/acceptance/
 data/server.*.log
 data/*.sqlite*
+data/latest_*.json
+data/latest_*.txt
+data/final_rule_matrix*.json
+data/quick_rule_matrix*.json
 .venv/
 .pytest_cache/
 .coverage

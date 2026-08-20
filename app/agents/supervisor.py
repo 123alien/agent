@@ -397,7 +397,7 @@ class SupervisorAgent:
         result = self.compliance_checker.run_contexts(
             state["document_contexts"],
             state["parsed_docs"],
-            state["task"].system_record,
+            {"project_id": state["task"].project_id, **state["task"].system_record},
         )
         self._enrich_result_evidence(result, state["document_contexts"])
         self._emit(
@@ -501,7 +501,7 @@ class SupervisorAgent:
                     agent_results=state["agent_results"],
                     issues=review.valid_issues,
                     execution_plan=state.get("rule_plan"),
-                    system_record=state["task"].system_record,
+                    system_record={"project_id": state["task"].project_id, **state["task"].system_record},
                 ),
             },
         )
@@ -719,7 +719,7 @@ class SupervisorAgent:
         plan = evaluation_rule_service.build_execution_plan(
             contexts=state["document_contexts"],
             docs=state["parsed_docs"],
-            system_record=task.system_record,
+            system_record={"project_id": task.project_id, **task.system_record},
             check_type=task.check_type,
         )
         result = AgentResult(

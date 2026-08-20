@@ -26,6 +26,7 @@ from app.services.report_service import (
     issue_is_confirmed, issue_needs_review, public_warning, report_agent_names,
     report_basis, report_conclusion_status, report_display_title,
     report_status_label, report_suggestion, select_report_issues,
+    three_part_rule_execution,
 )
 
 
@@ -265,7 +266,46 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         "覆盖文档完整性、基础信息一致性、评审数据复算、异常关联线索和整改闭环。",
         styles["body"],
     ))
-    story.append(_p("四、文档解析与数据质量", styles["h1"]))
+    rules_matrix = three_part_rule_execution(result)
+    story.append(_p("四、三部分规则执行结果", styles["h1"]))
+    if rules_matrix:
+        summary = rules_matrix.get("summary", {})
+        story.append(_p(
+            f"规则版本：{rules_matrix.get('ruleset_version') or rules_matrix.get('version') or '未记录'}。"
+            f"共{summary.get('total', 0)}条，实际执行{summary.get('executed', 0)}条；"
+            f"通过{summary.get('passed', 0)}条、明确问题{summary.get('confirmed_issue', 0)}条、"
+            f"待人工复核{summary.get('human_review', 0)}条、资料不足未执行{summary.get('insufficient_data', 0)}条、"
+            f"本次不适用{summary.get('not_applicable', 0)}条、停用/合并{summary.get('disabled', 0)}条。",
+            styles["body"],
+        ))
+        story.append(_p("资料不足未执行不等于通过；待人工复核不等于明确问题。", styles["body"]))
+        status_labels = {
+            "passed":"通过", "confirmed_issue":"明确问题", "human_review":"待人工复核",
+            "insufficient_data":"资料不足未执行", "not_applicable":"本次不适用", "disabled":"停用/合并",
+        }
+        for group in rules_matrix.get("groups", []):
+            story.append(_p(f"{group.get('group_code')}  {group.get('group_name')}", styles["h2"]))
+            rows = [[_p(x, styles["small"]) for x in ("规则", "核验事项", "风险", "状态", "证据/缺失资料")]]
+            for rule in group.get("rules", []):
+                details = rule.get("execution_evidence") or rule.get("missing_inputs") or [rule.get("reason", "")]
+                rows.append([_p(x, styles["small"]) for x in (
+                    rule.get("rule_id", ""), rule.get("item", ""), rule.get("risk_level", ""),
+                    status_labels.get(rule.get("status"), rule.get("status", "")),
+                    "；".join(str(x) for x in details if x) or "无",
+                )])
+            rule_table = Table(rows, colWidths=[17*mm, 36*mm, 14*mm, 27*mm, 66*mm], repeatRows=1)
+            rule_table.setStyle(TableStyle([
+                ("GRID", (0,0), (-1,-1), 0.4, colors.HexColor("#B8C2CC")),
+                ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8EEF5")),
+                ("VALIGN", (0,0), (-1,-1), "TOP"),
+                ("LEFTPADDING", (0,0), (-1,-1), 3), ("RIGHTPADDING", (0,0), (-1,-1), 3),
+                ("TOPPADDING", (0,0), (-1,-1), 3), ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+            ]))
+            story.append(rule_table)
+    else:
+        story.append(_p("本任务未形成三部分规则执行矩阵。", styles["body"]))
+
+    story.append(_p("五、文档解析与数据质量", styles["h1"]))
     for parsed in result.parsed_documents:
         story.append(_p(parsed.filename, styles["h2"]))
         quality_text = (
@@ -275,7 +315,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         story.append(_p(quality_text, styles["body"]))
         for warning in dict.fromkeys(public_warning(item) for item in parsed.warnings[:10]):
             story.append(_p(f"质量提示：{warning}", styles["small"]))
-    story.append(_p("五、风险与问题总览", styles["h1"]))
+    story.append(_p("六、风险与问题总览", styles["h1"]))
     if report_issues:
         issue_rows = [[_p(x, styles["small"]) for x in ("序号", "编号", "类型", "风险", "问题摘要", "复核")]]
         for index, issue in enumerate(report_issues, start=1):
@@ -294,7 +334,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
             ("TOPPADDING", (0,0), (-1,-1), 4), ("BOTTOMPADDING", (0,0), (-1,-1), 4),
         ]))
         story.append(issue_table)
-    story.append(_p("六、问题逐项说明", styles["h1"]))
+    story.append(_p("七、问题逐项说明", styles["h1"]))
     if not report_issues:
         story.append(_p("未发现需要输出的明确或潜在问题。", styles["body"]))
     for index, issue in enumerate(report_issues, start=1):
@@ -314,7 +354,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
             ("人工复核", "待完成" if issue_needs_review(issue) else ("已完成" if status == "正式核验版" else "无需复核")),
         ):
             story.append(_label_value_p(label, value, styles["body"]))
-    story.append(_p("七、专项智能体结论", styles["h1"]))
+    story.append(_p("八、专项智能体结论", styles["h1"]))
     for agent_name in report_agent_names(result):
         story.extend(
             [
@@ -322,7 +362,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
                 _p(final_agent_conclusion(result, agent_name, report_issues), styles["body"]),
             ]
         )
-    story.append(_p("八、人工复核与整改闭环", styles["h1"]))
+    story.append(_p("九、人工复核与整改闭环", styles["h1"]))
     review_agents = [item for item in result.agent_results if item.agent == "人工复核节点"]
     story.append(_p(
         review_agents[-1].summary if review_agents else "本任务尚未形成已提交的人工复核结论。",
@@ -332,7 +372,7 @@ def create_report_pdf(task: TaskRecord, result: TaskResult) -> Path:
         priority = "立即" if issue.risk_level == "高" else "优先" if issue.risk_level == "中" else "常规"
         story.append(_p(f"{index}. [{priority}] {report_suggestion(issue, status)}", styles["body"]))
     story.extend([
-        _p("九、综合结论", styles["h1"]),
+        _p("十、综合结论", styles["h1"]),
         _p(final_report_conclusion(result, report_issues), styles["body"]),
         PageBreak(),
         _p("附录A 证据索引", styles["h1"]),

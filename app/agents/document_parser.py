@@ -112,6 +112,13 @@ def _chunks(document_id: str, sections: list[DocumentSection], tables: list[Docu
     return result
 
 FIELD_PATTERNS: dict[str, tuple[str, list[re.Pattern[str]]]] = {
+    "project_id": (
+        "项目编号",
+        [
+            re.compile(r"(?:采购|招标)?项目编号(?:\s*/\s*包号)?[ \t]*[:：][ \t]*([^\n，。；]+)"),
+            re.compile(r"(?:采购|招标)编号[ \t]*[:：][ \t]*([^\n，。；]+)"),
+        ],
+    ),
     "project_name": (
         "项目名称",
         [
@@ -134,7 +141,8 @@ FIELD_PATTERNS: dict[str, tuple[str, list[re.Pattern[str]]]] = {
         "招标人/采购人",
         [
             re.compile(
-                r"(?:招标人|采[ \t]*购[ \t]*人|招标单位|采购单位)[ \t]*[:：][ \t]*([^\n]+)"
+                r"(?:招标人|采[ \t]*购[ \t]*人|招标单位|采购单位)"
+                r"(?:[ \t]*[（(][^）)\n]{0,12}[）)])?[ \t]*[:：][ \t]*([^\n]+)"
             )
         ],
     ),
@@ -142,15 +150,22 @@ FIELD_PATTERNS: dict[str, tuple[str, list[re.Pattern[str]]]] = {
         "招标代理机构/采购代理机构",
         [
             re.compile(
-                r"(?:招标代理机构|采购代理机构)[ \t]*[:：][ \t]*([^\n]+)"
+                r"(?:招标代理机构|采购代理机构)"
+                r"(?:[ \t]*[（(][^）)\n]{0,12}[）)])?[ \t]*[:：][ \t]*([^\n]+)"
             )
         ],
     ),
     "deadline": (
         "截止时间",
         [
-            re.compile(r"(?:投标|响应文件提交)?截止时间[ \t]*[:：][ \t]*([^\n]+)"),
-            re.compile(r"提交投标文件的截止时间[ \t]*[:：][ \t]*([^\n]+)"),
+            re.compile(
+                r"(?:投标|响应文件提交)?截止时间[ \t]*[:：][ \t]*"
+                r"(\d{4}[ \t]*[年./-][ \t]*\d{1,2}[ \t]*[月./-][ \t]*\d{1,2}[^\n，。；]*)"
+            ),
+            re.compile(
+                r"提交投标文件的截止时间[ \t]*[:：][ \t]*"
+                r"(\d{4}[ \t]*[年./-][ \t]*\d{1,2}[ \t]*[月./-][ \t]*\d{1,2}[^\n，。；]*)"
+            ),
             re.compile(
                 r"截止至本项目投标文件截止时间[ \t]*[:：]?[ \t]*"
                 r"(\d{4}[ \t]*年[ \t]*\d{1,2}[ \t]*月[ \t]*\d{1,2}[ \t]*日"
@@ -171,6 +186,7 @@ def _clean_field_value(field_name: str, value: object) -> str:
     """Remove repeated labels and stop a value before the next inline field."""
     cleaned = re.sub(r"[ \t]+", " ", str(value or "")).strip()
     own_labels = {
+        "project_id": ("项目编号", "采购项目编号", "招标项目编号", "采购编号", "招标编号"),
         "project_name": ("项目名称", "采购项目名称", "招标项目名称", "工程名称"),
         "tenderer": ("采购人", "招标人", "采购单位", "招标单位"),
         "procurement_agency": ("采购代理机构", "招标代理机构"),
@@ -287,11 +303,15 @@ def _is_placeholder_value(value: str) -> bool:
 
 
 def _is_definition_value(field_name: str, value: str) -> bool:
-    if field_name != "tenderer":
+    if field_name not in {"tenderer", "procurement_agency"}:
         return False
     compact = re.sub(r"\s+", "", value)
-    return compact.startswith("指") or (
-        "本项目采购人" in compact and "见" in compact
+    return (
+        compact.startswith(("指", "是指"))
+        or "依法进行政府采购" in compact
+        or "受采购人委托" in compact
+        or ("本项目采购人" in compact and "见" in compact)
+        or ("本项目采购代理机构" in compact and "见" in compact)
     )
 
 
@@ -566,6 +586,23 @@ def _cell(row: list[str], index: int | None) -> str:
     return row[index].strip() if index is not None and index < len(row) else ""
 
 
+def _looks_like_bidder_name(value: str) -> bool:
+    """Reject scoring criteria accidentally parsed as bidder names.
+
+    Real supplier names are short entity labels. Long prose, numbered rule text and
+    scoring instructions must never become opening records merely because a table
+    contains a column whose header happens to include ``投标人``.
+    """
+    compact = re.sub(r"\s+", "", value or "")
+    if not compact or len(compact) > 80 or "\n" in value:
+        return False
+    if re.match(r"^[（(]?\d+[）).、]", compact):
+        return False
+    if any(marker in compact for marker in ("评标委员会", "说明：", "说明:", "得分", "不得分", "扫描件")):
+        return False
+    return bool(re.search(r"(?:公司|集团|企业|中心|研究院|事务所|合作社|大学|医院|厂)$", compact))
+
+
 def _extract_tabular_records(content: ParsedFileContent) -> tuple[
     list[OpeningRecord], list[ScoreDetail], list[ScoreSummary], list[CandidateRanking]
 ]:
@@ -573,9 +610,24 @@ def _extract_tabular_records(content: ParsedFileContent) -> tuple[
     details: list[ScoreDetail] = []
     summaries: list[ScoreSummary] = []
     rankings: list[CandidateRanking] = []
+    # Official evaluation reports commonly put experts in columns and factors in
+    # rows.  Keep the active header/bidder so split tables on the next page can
+    # inherit their context.
+    horizontal_experts: list[str] = []
+    horizontal_bidder = ""
+    page_titles: dict[int, list[str]] = {}
+    page_title_indexes: dict[int, int] = {}
+    for page in content.pages:
+        page_titles[page.number] = [
+            re.sub(r"\s+", "", name)
+            for name in re.findall(r"([^\n]{2,80}(?:公司|集团|企业|中心|研究院|事务所))\s*得分表", page.text or "")
+            if _looks_like_bidder_name(re.sub(r"\s+", "", name))
+        ]
     for table in content.tables:
-        if len(table.rows) < 2:
+        if not table.rows:
             continue
+        # A one-row table may be either an expert header or a final continuation
+        # row, so it must still pass through horizontal-table handling.
         headers = table.rows[0]
         bidder_i = _header_index(headers, "投标人", "供应商", "单位名称", "supplier_name", "bidder")
         expert_i = _header_index(headers, "专家", "评委")
@@ -584,15 +636,71 @@ def _extract_tabular_records(content: ParsedFileContent) -> tuple[
         score_i = _header_index(headers, "得分", "原始分")
         weight_i = _header_index(headers, "权重", "折算比例")
         weighted_i = _header_index(headers, "折算得分", "加权得分")
-        total_i = _header_index(headers, "总得分", "总分", "合计得分")
+        business_i = _header_index(headers, "商务标部分", "商务得分", "商务分")
+        technical_i = _header_index(headers, "技术标部分", "技术得分", "技术分")
+        price_score_i = _header_index(headers, "价格标部分", "价格得分", "报价得分")
+        total_i = _header_index(headers, "总得分", "总分", "合计得分", "得分合计")
         rank_i = _header_index(headers, "排名", "排序", "名次")
         price_i = _header_index(headers, "投标报价", "报价金额", "投标总价", "bid_price")
         lot_i = _header_index(headers, "标段", "包号", "采购包")
+
+        # Horizontal expert scoring table, including page-split continuation.
+        compact_header = [re.sub(r"\s+", "", str(cell)) for cell in headers]
+        is_expert_header = bool(compact_header and compact_header[0] == "评委")
+        if is_expert_header:
+            horizontal_experts = [
+                name for name in compact_header[1:]
+                if re.fullmatch(r"[\u4e00-\u9fa5·]{2,8}", name)
+            ]
+            titles = page_titles.get(table.page or 0, [])
+            title_index = page_title_indexes.get(table.page or 0, 0)
+            if title_index < len(titles):
+                horizontal_bidder = titles[title_index]
+                page_title_indexes[table.page or 0] = title_index + 1
+            data_rows = table.rows[1:]
+        elif horizontal_experts and len(headers) >= len(horizontal_experts) + 1:
+            # A continuation table can begin directly with factor rows.
+            data_rows = table.rows
+        else:
+            data_rows = []
+
+        if horizontal_bidder and horizontal_experts and data_rows:
+            section = ""
+            for offset, row in enumerate(data_rows, start=2):
+                cells = [str(cell).strip() for cell in row]
+                if not cells:
+                    continue
+                if cells[0] and any(key in re.sub(r"\s+", "", cells[0]) for key in ("商务标部分", "技术标部分", "价格标部分")):
+                    section = re.sub(r"（.*?分）", "", re.sub(r"\s+", "", cells[0]))
+                factor_index = 1 if len(cells) >= len(horizontal_experts) + 2 else 0
+                factor = re.sub(r"\s+", "", _cell(cells, factor_index))
+                if not factor or factor == "合计":
+                    continue
+                max_match = re.search(r"[（(](\d+(?:\.\d+)?)分[）)]", factor)
+                max_score = float(max_match.group(1)) if max_match else None
+                score_start = factor_index + 1
+                scores = cells[score_start:score_start + len(horizontal_experts)]
+                if len(scores) < len(horizontal_experts):
+                    continue
+                for expert, score_text in zip(horizontal_experts, scores):
+                    score = _number(score_text)
+                    if score is None:
+                        continue
+                    details.append(ScoreDetail(
+                        bidder=horizontal_bidder,
+                        expert=expert,
+                        factor=f"{section}/{factor}" if section else factor,
+                        max_score=max_score,
+                        raw_score=score,
+                        source=SourceLocation(page=table.page, row=offset),
+                    ))
+            # Do not also run the vertical-table parser for this table.
+            continue
         if bidder_i is None:
             continue
         for offset, row in enumerate(table.rows[1:], start=2):
-            bidder = _cell(row, bidder_i)
-            if not bidder or bidder in {"合计", "总计"}:
+            bidder = re.sub(r"\s+", "", _cell(row, bidder_i))
+            if not bidder or bidder in {"合计", "总计"} or not _looks_like_bidder_name(bidder):
                 continue
             source = SourceLocation(sheet=table.sheet, row=offset, cell=f"{table.sheet}!{offset}")
             lot = _cell(row, lot_i)
@@ -607,7 +715,13 @@ def _extract_tabular_records(content: ParsedFileContent) -> tuple[
                 ))
             if total_i is not None or rank_i is not None:
                 rank = _integer(_cell(row, rank_i))
-                summaries.append(ScoreSummary(bidder=bidder, lot=lot, total_score=_number(_cell(row, total_i)), rank=rank, source=source))
+                summaries.append(ScoreSummary(
+                    bidder=bidder, lot=lot,
+                    business_score=_number(_cell(row, business_i)),
+                    technical_score=_number(_cell(row, technical_i)),
+                    price_score=_number(_cell(row, price_score_i)),
+                    total_score=_number(_cell(row, total_i)), rank=rank, source=source,
+                ))
                 if rank is not None:
                     rankings.append(CandidateRanking(bidder=bidder, lot=lot, rank=rank, source=source))
     return openings, details, summaries, rankings
@@ -650,6 +764,21 @@ def _extract_text_records(
             rank_text = candidate.group(1)
             rank = int(rank_text) if rank_text.isdigit() else chinese.find(rank_text) + 1
             rankings.append(CandidateRanking(bidder=candidate.group(2).strip(), rank=rank or None, evidence=line, source=source))
+    # PDF text extraction frequently places the ranking label and supplier name
+    # on adjacent lines. Recover these rows without allowing narrative phrases
+    # such as “第一中标候选人为中标人” to become bidder names.
+    for candidate in re.finditer(
+        r"第\s*([一二三四五六七八九十\d]+)\s*中标候选人\s*[：:]?\s*[\r\n]+\s*"
+        r"([^\r\n]{2,80}?(?:公司|集团|企业|中心|研究院|事务所))",
+        text,
+    ):
+        rank_text = candidate.group(1)
+        chinese = "一二三四五六七八九十"
+        rank = int(rank_text) if rank_text.isdigit() else chinese.find(rank_text) + 1
+        bidder = re.sub(r"\s+", "", candidate.group(2))
+        evidence = candidate.group(0).strip()
+        if not any(item.rank == rank and re.sub(r"\s+", "", item.bidder) == bidder for item in rankings):
+            rankings.append(CandidateRanking(bidder=bidder, rank=rank or None, evidence=evidence))
     return unique_keep_order(invalid_bid_clauses)[:100], rejections[:100], opinions[:100], rankings[:100]
 
 

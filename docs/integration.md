@@ -158,3 +158,12 @@ GET /api/agent/review-rules
 该接口返回三部分、41 条规则的稳定编号、责任智能体、执行方式和启停状态。任务执行后的实际规则矩阵位于“结果复核智能体”的 `data.three_part_rule_execution` 字段。`insufficient_data` 只表示本次资料不足，调用方不得将其显示为通过。
 
 规则结果中的 `required_inputs`、`missing_inputs`、`execution_evidence` 和 `calculation` 分别表示执行所需输入、实际缺失输入、采用的原始证据以及可复现计算口径。集成系统应展示这些字段，不应仅展示状态名称。
+
+三部分规则矩阵生成后，可直接下载独立 Word 报告（无需等待所有人工复核完成）：
+
+```http
+GET /api/agent/tasks/{task_id}/rules-report.docx
+```
+
+报告会分别列出三部分规则的执行状态、证据、计算过程和缺失资料。调用方不得将
+`insufficient_data` 显示为通过，也不得将 `human_review` 自动升级为明确问题。

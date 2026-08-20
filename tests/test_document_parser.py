@@ -11,6 +11,7 @@ from app.agents.document_parser import (
     DocumentParserAgent,
     _clean_field_value,
     _expected_visual_marks,
+    _extract_tabular_records,
     _extract_fields,
     _infer_subtype_from_content,
     _response_entities,
@@ -56,6 +57,29 @@ class FieldCleanupTests(unittest.TestCase):
 
 
 class FileParserTests(unittest.TestCase):
+    def test_extracts_horizontal_expert_scores_across_page_split(self) -> None:
+        content = ParsedFileContent(
+            text="甲科技有限公司得分表\n乙科技有限公司得分表",
+            pages=[
+                ParsedPage(number=1, text="甲科技有限公司得分表"),
+                ParsedPage(number=2, text="乙科技有限公司得分表"),
+            ],
+            tables=[
+                ParsedTableData(page=1, rows=[
+                    ["评委", "", "张三", "李四"],
+                    ["商务标部分（40分）", "业绩（10分）", "8", "9"],
+                ]),
+                ParsedTableData(page=2, rows=[["评委", "", "张三", "李四"]]),
+                ParsedTableData(page=2, rows=[
+                    ["技术标部分（30分）", "方案（10分）", "7", "8"],
+                ]),
+            ],
+        )
+        _, details, _, _ = _extract_tabular_records(content)
+        self.assertEqual(len(details), 4)
+        self.assertEqual({item.bidder for item in details}, {"甲科技有限公司", "乙科技有限公司"})
+        self.assertEqual({item.expert for item in details}, {"张三", "李四"})
+
     def test_parse_utf8_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.txt"

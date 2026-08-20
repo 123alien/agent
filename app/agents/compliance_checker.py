@@ -228,6 +228,11 @@ class ComplianceCheckerAgent:
                 else:
                     raw_text = doc.extracted_fields.get(field_name)
                     value = raw_text.value if raw_text else ""
+                if field_name == "project_name":
+                    value = re.sub(r"^项目名称\s*[:：]?\s*", "", str(value or "")).strip()
+                    value = re.sub(r"(?:第?\d+|[一二三四五六七八九十]+)(?:分?包|标段)$", "", value)
+                    if len(value) > 120 or re.match(r"^\d+[.、]", value):
+                        continue
                 normalized = self._normalize_compare_value(value)
                 if normalized:
                     values.setdefault(normalized, []).append(
@@ -796,10 +801,18 @@ class ComplianceCheckerAgent:
         result: list[Issue] = []
         seen: set[tuple[str, str, tuple[str, ...]]] = set()
         for issue in issues:
+            meaningful_evidence = [
+                value.strip() for value in issue.evidence
+                if value and value.strip().lower() not in {"none", "null", "未提供", "未识别"}
+            ]
+            if issue.issue_type == "跨文件基础信息不一致" and len(meaningful_evidence) < 2:
+                # A cross-file conflict requires at least two actual source values.
+                # Semantic workflows must not turn missing placeholders into a conflict.
+                continue
             fingerprint = (
                 issue.source_file,
                 issue.issue_type,
-                tuple(value.strip() for value in issue.evidence),
+                tuple(meaningful_evidence),
             )
             if fingerprint in seen:
                 continue

@@ -159,6 +159,9 @@ class ScoreDetail(BaseModel):
 class ScoreSummary(BaseModel):
     bidder: str = ""
     lot: str = ""
+    business_score: float | None = None
+    technical_score: float | None = None
+    price_score: float | None = None
     total_score: float | None = None
     rank: int | None = None
     source: SourceLocation = Field(default_factory=SourceLocation)

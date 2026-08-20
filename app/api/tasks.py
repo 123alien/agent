@@ -30,6 +30,7 @@ from app.services.time_utils import now_iso
 from app.services.deliverable_service import create_deliverable_xlsx
 from app.services.project_index import project_index_service
 from app.services.evaluation_rule_service import public_rule_catalog
+from scripts.generate_three_part_rule_report import generate as generate_three_part_rule_report
 
 router = APIRouter()
 
@@ -71,7 +72,7 @@ def get_capabilities() -> dict:
             "整改建议报告",
             "标准化评标报告",
         ],
-        "report_formats": ["json", "markdown", "docx", "pdf"],
+        "report_formats": ["json", "markdown", "docx", "pdf", "three_part_rules_docx"],
         "task_statuses": ["pending", "running", "waiting_review", "completed", "failed"],
         "finding_statuses": ["confirmed_issue", "human_review", "passed"],
         "protocol": {
@@ -621,6 +622,25 @@ def download_pdf_report(task_id: str) -> FileResponse:
     if not report_path.exists():
         raise HTTPException(status_code=404, detail="PDF 报告尚未生成")
     return FileResponse(report_path, media_type="application/pdf", filename=f"{task_id}_智能核验报告.pdf")
+
+
+@router.get("/tasks/{task_id}/rules-report.docx")
+def download_three_part_rule_report(task_id: str) -> FileResponse:
+    """Generate and download a three-part rule execution report on demand."""
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    try:
+        report_path = generate_three_part_rule_report(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="任务数据不存在") from exc
+    return FileResponse(
+        report_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{task_id}_三部分规则执行报告.docx",
+    )
 
 
 @router.post("/tasks/{task_id}/review")

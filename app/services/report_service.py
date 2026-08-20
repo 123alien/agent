@@ -487,6 +487,69 @@ def report_display_title(report_type: str, template_type: str) -> str:
     return report_type
 
 
+def three_part_rule_execution(result: TaskResult) -> dict:
+    """Return the latest three-part rule matrix recorded by result review."""
+    for item in reversed(result.agent_results):
+        if item.agent != "结果复核智能体" or not isinstance(item.data, dict):
+            continue
+        matrix = item.data.get("three_part_rule_execution")
+        if isinstance(matrix, dict):
+            return matrix
+    return {}
+
+
+def _add_three_part_rules_docx(document: Document, result: TaskResult) -> None:
+    matrix = three_part_rule_execution(result)
+    document.add_heading("四、三部分规则执行结果", level=1)
+    if not matrix:
+        document.add_paragraph("本任务未形成三部分规则执行矩阵。")
+        return
+    summary = matrix.get("summary", {})
+    document.add_paragraph(
+        f"规则版本：{matrix.get('ruleset_version') or matrix.get('version') or '未记录'}。"
+        f"共{summary.get('total', 0)}条规则，实际执行{summary.get('executed', 0)}条；"
+        f"通过{summary.get('passed', 0)}条、明确问题{summary.get('confirmed_issue', 0)}条、"
+        f"待人工复核{summary.get('human_review', 0)}条、资料不足未执行{summary.get('insufficient_data', 0)}条、"
+        f"本次不适用{summary.get('not_applicable', 0)}条、停用或合并{summary.get('disabled', 0)}条。"
+    )
+    note = document.add_table(rows=1, cols=1)
+    note.style = "Table Grid"
+    _set_table_geometry(note, [9360])
+    _set_cell_fill(note.cell(0, 0), "FFF8E8")
+    _add_cell_text(
+        note.cell(0, 0),
+        "口径说明：资料不足未执行不等于通过；待人工复核不等于明确问题。"
+        "补齐材料或完成人工复核后，应重新生成最终结论。",
+        bold=True,
+    )
+    for group in matrix.get("groups", []):
+        document.add_heading(f"{group.get('group_code')}  {group.get('group_name')}", level=2)
+        table = document.add_table(rows=1, cols=6)
+        table.style = "Table Grid"
+        _set_table_geometry(table, [850, 1250, 1800, 1350, 1450, 2660])
+        _add_table_header(table, ("规则", "类别", "核验事项", "风险", "状态", "证据/缺失资料"))
+        for rule in group.get("rules", []):
+            status = {
+                "passed": "通过", "confirmed_issue": "明确问题", "human_review": "待人工复核",
+                "insufficient_data": "资料不足未执行", "not_applicable": "本次不适用",
+                "disabled": "停用/合并",
+            }.get(rule.get("status"), rule.get("status", ""))
+            details = rule.get("execution_evidence") or rule.get("missing_inputs") or [rule.get("reason", "")]
+            values = (
+                rule.get("rule_id", ""), rule.get("category", ""), rule.get("item", ""),
+                rule.get("risk_level", ""), status, "；".join(str(x) for x in details if x) or "无",
+            )
+            cells = table.add_row().cells
+            for cell, value in zip(cells, values, strict=True):
+                _add_cell_text(cell, value)
+        reviewed = [rule for rule in group.get("rules", []) if rule.get("status") in {"passed", "confirmed_issue", "human_review"}]
+        for rule in reviewed:
+            calculation = rule.get("calculation") or "无"
+            document.add_paragraph(
+                f"{rule.get('rule_id')} {rule.get('item')}：{rule.get('reason', '')} 计算/比对过程：{calculation}"
+            )
+
+
 def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
     """Generate an enterprise-grade, traceable evaluation verification report."""
     ensure_data_dirs()
@@ -647,8 +710,8 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
     document.add_heading("目录", level=1)
     for item in (
         "一、执行摘要", "二、项目与核验范围", "三、核验方法与执行过程",
-        "四、文档解析与数据质量", "五、风险与问题总览", "六、问题逐项说明",
-        "七、专项智能体结论", "八、人工复核与整改闭环", "九、综合结论",
+        "四、三部分规则执行结果", "五、文档解析与数据质量", "六、风险与问题总览", "七、问题逐项说明",
+        "八、专项智能体结论", "九、人工复核与整改闭环", "十、综合结论",
         "附录A 证据索引", "附录B 执行与版本信息",
     ):
         document.add_paragraph(item, style="Normal")
@@ -781,7 +844,9 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
         for cell, value in zip(cells, values, strict=True):
             _add_cell_text(cell, value)
 
-    document.add_heading("四、文档解析与数据质量", level=1)
+    _add_three_part_rules_docx(document, result)
+
+    document.add_heading("五、文档解析与数据质量", level=1)
     quality = document.add_table(rows=1, cols=7)
     quality.style = "Table Grid"
     _set_table_geometry(quality, [2100, 900, 900, 900, 900, 900, 2760])
@@ -801,7 +866,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
         for cell, value in zip(cells, values, strict=True):
             _add_cell_text(cell, value)
 
-    document.add_heading("五、风险与问题总览", level=1)
+    document.add_heading("六、风险与问题总览", level=1)
     if report_issues:
         matrix = document.add_table(rows=1, cols=7)
         matrix.style = "Table Grid"
@@ -823,7 +888,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
     else:
         document.add_paragraph("未发现需要输出的明确或潜在问题。")
 
-    document.add_heading("六、问题逐项说明", level=1)
+    document.add_heading("七、问题逐项说明", level=1)
     if not report_issues:
         document.add_paragraph("未发现需要输出的明确或潜在问题。")
     for index, issue in enumerate(report_issues, start=1):
@@ -848,12 +913,12 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
         ]
         _add_label_value_table(document, rows)
 
-    document.add_heading("七、专项智能体结论", level=1)
+    document.add_heading("八、专项智能体结论", level=1)
     for agent_name in report_agent_names(result):
         document.add_heading(agent_name, level=2)
         document.add_paragraph(final_agent_conclusion(result, agent_name, report_issues))
 
-    document.add_heading("八、人工复核与整改闭环", level=1)
+    document.add_heading("九、人工复核与整改闭环", level=1)
     human_review = next(
         (
             item
@@ -890,7 +955,7 @@ def create_docx_report(task: TaskRecord, result: TaskResult) -> Path:
     else:
         document.add_paragraph("当前没有需要输出的整改建议。")
 
-    document.add_heading("九、综合结论", level=1)
+    document.add_heading("十、综合结论", level=1)
     document.add_paragraph(final_report_conclusion(result, report_issues))
     document.add_paragraph(
         "处置建议：对高风险事项应优先暂停相关结论的直接使用并组织专项复核；"

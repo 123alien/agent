@@ -31,6 +31,15 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertIn("docx", payload["report_formats"])
         self.assertIn("pdf", payload["report_formats"])
+        self.assertIn("three_part_rules_docx", payload["report_formats"])
+
+    def test_openapi_exposes_three_part_rule_report(self) -> None:
+        response = self.client.get("/openapi.json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "/api/agent/tasks/{task_id}/rules-report.docx",
+            response.json()["paths"],
+        )
 
     def test_openapi_version_matches_contract(self) -> None:
         response = self.client.get("/openapi.json")
